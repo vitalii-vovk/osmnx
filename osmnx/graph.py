@@ -778,8 +778,19 @@ def _add_paths(G, paths, bidirectional=False):
         # the path is NOT one-way, reverse direction of each edge and add this
         # path going the opposite direction too
         edges = list(zip(nodes[:-1], nodes[1:]))
-        if not is_one_way:
-            edges.extend([(v, u) for u, v in edges])
+
+        # CAUTION: Next lines generates multiple edges for two-way roads.
+        # This is OK in terms of graph structure, but generates problem for
+        # road geometry, because each edge have the same attributes (number
+        # of lanes, shoulders, lanes directions, etc.)
+        # Because we do not use a regular properties of the directional graph,
+        # (and use edge's attributes instead to navigate), we can ommit
+        # building the multiple edges for two-way roads. To do so we simply
+        # commented-out the next two lines of code:
+        # =============================================
+        # if not is_one_way:
+        #     edges.extend([(v, u) for u, v in edges])
+        # =============================================
 
         # add all the edge tuples and give them the path's tag:value attrs
         G.add_edges_from(edges, **path)
