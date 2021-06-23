@@ -612,6 +612,24 @@ def _convert_path(element):
     return path
 
 
+def _assign_route_to_way(route_id, way):
+    if way is not None:
+        way['route_id'] = route_id
+
+
+def _process_route_relation(r, relations, ways):
+    for m in r['members']:
+        if m['type'] == 'relation':
+            if m['ref'] in relations:
+                _process_route_relation(relations[m['ref']], relations, ways)
+        elif m['type'] == 'way':
+            _assign_route_to_way(r['id'], ways.get(m['ref'], None))
+
+
+def _convert_relation(element):
+    return element
+
+
 def _parse_nodes_paths(response_json):
     """
     Construct dicts of nodes and paths from an Overpass response.
@@ -628,11 +646,18 @@ def _parse_nodes_paths(response_json):
     """
     nodes = dict()
     paths = dict()
+    relations = dict()
     for element in response_json["elements"]:
         if element["type"] == "node":
             nodes[element["id"]] = _convert_node(element)
         elif element["type"] == "way":
             paths[element["id"]] = _convert_path(element)
+        elif element["type"] == "relation":
+            relations[element["id"]] = _convert_relation(element)
+
+    for id, r in relations.items():
+        if r["type"] == "relation" and r['tags'].get('route', None) == 'road':
+            _process_route_relation(r, relations, paths)
 
     return nodes, paths
 
