@@ -496,7 +496,7 @@ def graph_from_xml(filepath, bidirectional=False, simplify=True, retain_all=Fals
 
     # simplify the graph topology as the last step
     if simplify:
-        G = simplification.simplify_graph(G)
+        G = simplification.simplify_graph(G, strict=False)
 
     utils.log(f"graph_from_xml returned graph with {len(G)} nodes and {len(G.edges)} edges")
     return G
