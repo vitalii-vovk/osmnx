@@ -600,7 +600,10 @@ def _convert_path(element):
     -------
     path : dict
     """
-    path = {"osmid": element["id"]}
+    path = {
+        "osmid": element["id"],
+        "route_id": (element["id"],),
+    }
 
     # remove any consecutive duplicate elements in the list of nodes
     path["nodes"] = [group[0] for group in itertools.groupby(element["nodes"])]
@@ -617,13 +620,16 @@ def _assign_route_to_way(route_id, way):
         way['route_id'] = route_id
 
 
-def _process_route_relation(r, relations, ways):
+def _process_route_relation(r, relations, ways, parent_id=None):
     for m in r['members']:
         if m['type'] == 'relation':
             if m['ref'] in relations:
-                _process_route_relation(relations[m['ref']], relations, ways)
+                _process_route_relation(relations[m['ref']], relations, ways, [r['id']])
         elif m['type'] == 'way':
-            _assign_route_to_way(r['id'], ways.get(m['ref'], None))
+            if parent_id is None:
+                parent_id = tuple()
+            parent_id = tuple(r['id'], *parent_id)
+            _assign_route_to_way(parent_id, ways.get(m['ref'], None))
 
 
 def _convert_relation(element):
