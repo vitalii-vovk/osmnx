@@ -189,6 +189,8 @@ def _get_paths_to_simplify(G, strict=True):
                 # from the endpoint node, through the successor, and on to the
                 # next endpoint node
                 yield _build_path(G, endpoint, successor, endpoints)
+            else:
+                yield [endpoint, successor]
 
 
 def simplify_graph(G, strict=True, remove_rings=True):
@@ -285,7 +287,11 @@ def simplify_graph(G, strict=True, remove_rings=True):
     # for each edge to add in the list we assembled, create a new edge between
     # the origin and destination
     for edge in all_edges_to_add:
-        G.add_edge(edge["origin"], edge["destination"], **edge["attr_dict"])
+        attr = dict(**edge["attr_dict"])
+        G.update(edges=[
+            [edge["origin"], edge["destination"], 0, edge["attr_dict"]]
+        ])
+        # G.add_edge(edge["origin"], edge["destination"], **edge["attr_dict"])
 
     # finally remove all the interstitial nodes between the new edges
     G.remove_nodes_from(set(all_nodes_to_remove))
