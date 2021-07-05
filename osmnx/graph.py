@@ -496,7 +496,7 @@ def graph_from_xml(filepath, bidirectional=False, simplify=True, retain_all=Fals
 
     # simplify the graph topology as the last step
     if simplify:
-        G = simplification.simplify_graph(G)
+        G = simplification.simplify_graph(G, strict=False)
 
     utils.log(f"graph_from_xml returned graph with {len(G)} nodes and {len(G.edges)} edges")
     return G
@@ -600,7 +600,10 @@ def _convert_path(element):
     -------
     path : dict
     """
-    path = {"osmid": element["id"]}
+    path = {
+        "osmid": element["id"],
+        "route_id": (element["id"],),
+    }
 
     # remove any consecutive duplicate elements in the list of nodes
     path["nodes"] = [group[0] for group in itertools.groupby(element["nodes"])]
@@ -610,6 +613,27 @@ def _convert_path(element):
             if useful_tag in element["tags"]:
                 path[useful_tag] = element["tags"][useful_tag]
     return path
+
+
+def _assign_route_to_way(route_id, way):
+    if way is not None:
+        way['route_id'] = route_id
+
+
+def _process_route_relation(r, relations, ways, parent_id=None):
+    for m in r['members']:
+        if m['type'] == 'relation':
+            if m['ref'] in relations:
+                _process_route_relation(relations[m['ref']], relations, ways, [r['id']])
+        elif m['type'] == 'way':
+            if parent_id is None:
+                parent_id = tuple()
+            parent_id = tuple(r['id'], *parent_id)
+            _assign_route_to_way(parent_id, ways.get(m['ref'], None))
+
+
+def _convert_relation(element):
+    return element
 
 
 def _parse_nodes_paths(response_json):
@@ -628,11 +652,18 @@ def _parse_nodes_paths(response_json):
     """
     nodes = dict()
     paths = dict()
+    relations = dict()
     for element in response_json["elements"]:
         if element["type"] == "node":
             nodes[element["id"]] = _convert_node(element)
         elif element["type"] == "way":
             paths[element["id"]] = _convert_path(element)
+        elif element["type"] == "relation":
+            relations[element["id"]] = _convert_relation(element)
+
+    for id, r in relations.items():
+        if r["type"] == "relation" and r['tags'].get('route', None) == 'road':
+            _process_route_relation(r, relations, paths)
 
     return nodes, paths
 
@@ -753,8 +784,19 @@ def _add_paths(G, paths, bidirectional=False):
         # the path is NOT one-way, reverse direction of each edge and add this
         # path going the opposite direction too
         edges = list(zip(nodes[:-1], nodes[1:]))
-        if not is_one_way:
-            edges.extend([(v, u) for u, v in edges])
+
+        # CAUTION: Next lines generates multiple edges for two-way roads.
+        # This is OK in terms of graph structure, but generates problem for
+        # road geometry, because each edge have the same attributes (number
+        # of lanes, shoulders, lanes directions, etc.)
+        # Because we do not use a regular properties of the directional graph,
+        # (and use edge's attributes instead to navigate), we can ommit
+        # building the multiple edges for two-way roads. To do so we simply
+        # commented-out the next two lines of code:
+        # =============================================
+        # if not is_one_way:
+        #     edges.extend([(v, u) for u, v in edges])
+        # =============================================
 
         # add all the edge tuples and give them the path's tag:value attrs
         G.add_edges_from(edges, **path)
