@@ -7,6 +7,7 @@ import warnings
 import networkx as nx
 import numpy as np
 import pandas as pd
+import pyproj
 from rtree.index import Index as RTreeIndex
 from shapely.geometry import Point
 
@@ -218,7 +219,7 @@ def nearest_nodes(G, X, Y, return_dist=False):
         return nn
 
 
-def nearest_edges(G, X, Y, interpolate=None, return_dist=False):
+def nearest_edges(G, X, Y, interpolate=None, return_dist=False, ref=None):
     """
     Find the nearest edge to a point or to each of several points.
 
@@ -273,6 +274,10 @@ def nearest_edges(G, X, Y, interpolate=None, return_dist=False):
         raise ValueError("`X` and `Y` cannot contain nulls")
     geoms = utils_graph.graph_to_gdfs(G, nodes=False)["geometry"]
 
+    crs = None
+    if ref is not None:
+        crs = pyproj.Proj(proj='aeqd', ellps='WGS84', datum='WGS84', lat_0=ref[0], lon_0=ref[1]).srs
+
     # if no interpolation distance was provided
     if interpolate is None:
 
@@ -285,7 +290,10 @@ def nearest_edges(G, X, Y, interpolate=None, return_dist=False):
         # then minimize euclidean distance from point to the possible matches
         ne_dist = list()
         for xy in zip(X, Y):
-            dists = geoms.iloc[list(rtree.nearest(xy))].distance(Point(xy))
+            if crs is not None:
+                dists = geoms.iloc[list(rtree.nearest(xy))].to_crs(crs).distance(Point(xy))
+            else:
+                dists = geoms.iloc[list(rtree.nearest(xy))].distance(Point(xy))
             ne_dist.append((dists.idxmin(), dists.min()))
         ne, dist = zip(*ne_dist)
 
