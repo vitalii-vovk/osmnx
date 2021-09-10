@@ -4,6 +4,7 @@ import logging as lg
 
 import geopandas as gpd
 import networkx as nx
+import pyproj
 from shapely.geometry import LineString
 from shapely.geometry import Point
 from shapely.geometry import Polygon
@@ -277,6 +278,30 @@ def simplify_graph(G, strict=True, remove_rings=True):
             [Point((G.nodes[node]["x"], G.nodes[node]["y"])) for node in path]
         )
         edge_attributes["length"] = sum(edge_attributes["length"])
+
+        # Set the 'direction' attribute to the edge
+        # if such attribute is missed. The direction is estimated
+        # by analyzing the direction between the start and end nodes,
+        # and quantized to the four values: North, West, South, East
+        if 'direction' not in edge_attributes:
+            #See: https://stackoverflow.com/questions/54873868/python-calculate-bearing-between-two-lat-long
+            geodesic = pyproj.Geod(ellps='WGS84')
+            #Find azimuth of the two points by using their indexes
+            p1 = G.nodes[path[0]]
+            p2 = G.nodes[path[1]]
+            fwd_azimuth_goal, _, _ =\
+                geodesic.inv(p1['x'], p1['y'], p2['x'], p2['y'])
+            if fwd_azimuth_goal < 0:
+                fwd_azimuth_goal += 360
+            if fwd_azimuth_goal > 315 or fwd_azimuth_goal <= 45:
+                direction = 'north'
+            if 45 < fwd_azimuth_goal <= 135:
+                direction = 'east'
+            if 135 < fwd_azimuth_goal <= 225:
+                direction = 'south'
+            else:
+                direction = 'west'
+            edge_attributes['direction'] = direction
 
         # add the nodes and edges to their lists for processing at the end
         all_nodes_to_remove.extend(path[1:-1])
