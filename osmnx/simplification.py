@@ -71,21 +71,23 @@ def _is_endpoint(G, node, strict=True):
     elif not strict:
         # non-strict mode: do its incident edges have different OSM IDs?
         osmids = []
+        route_ids = []
 
         # add all the edge OSM IDs for incoming edges
         for u in G.predecessors(node):
             for key in G[u][node]:
                 osmids.append(G.edges[u, node, key]["osmid"])
+                route_ids.append(G.edges[u, node, key]["route_id"])
 
         # add all the edge OSM IDs for outgoing edges
         for v in G.successors(node):
             for key in G[node][v]:
                 osmids.append(G.edges[node, v, key]["osmid"])
+                route_ids.append(G.edges[node, v, key]["route_id"])
 
         # if there is more than 1 OSM ID in the list of edge OSM IDs then it is
         # an endpoint, if not, it isn't
-        return len(set(osmids)) > 1
-
+        return len(set(osmids)) > 1 or len(set(route_ids)) > 1
     # if none of the preceding rules returned true, then it is not an endpoint
     else:
         return False
@@ -279,28 +281,6 @@ def simplify_graph(G, strict=True, remove_rings=True):
             [Point((G.nodes[node]["x"], G.nodes[node]["y"])) for node in path]
         )
         edge_attributes["length"] = sum(edge_attributes["length"])
-
-        # Set the 'direction' attribute to the edge
-        # if such attribute is missed. The direction is estimated
-        # by analyzing the direction between the start and end nodes,
-        # and quantized to the four values: North, West, South, East
-        if 'direction' not in edge_attributes:
-            # Find azimuth of the two points by using their indexes
-            p1 = G.nodes[path[0]]
-            p2 = G.nodes[path[-1]]
-            direction = None
-            fwd_azimuth_goal = calculate_bearing(p1['y'], p1['x'], p2['y'], p2['x'])
-            if fwd_azimuth_goal < 0:
-                fwd_azimuth_goal += 360
-            if fwd_azimuth_goal > 315 or fwd_azimuth_goal <= 45:
-                direction = 'north'
-            elif 45 < fwd_azimuth_goal <= 135:
-                direction = 'east'
-            elif 135 < fwd_azimuth_goal <= 225:
-                direction = 'south'
-            else:
-                direction = 'west'
-            edge_attributes['direction'] = direction
 
         # add the nodes and edges to their lists for processing at the end
         all_nodes_to_remove.extend(path[1:-1])

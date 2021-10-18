@@ -353,6 +353,33 @@ def graph_from_place(
     return G
 
 
+def update_edges_direction(G):
+    # Set the 'direction' attribute to the edge
+    # if such attribute is missed. The direction is estimated
+    # by analyzing the direction between the start and end nodes,
+    # and quantized to the four values: North, West, South, East
+    for edge_id in G.edges:
+        edge = G.edges[edge_id]
+        if 'direction' not in edge and 'geometry' in edge:
+            # Find azimuth of the two points by using their indexes
+            p1 = (edge['geometry'].coords.xy[0][0], edge['geometry'].coords.xy[1][0])
+            p2 = (edge['geometry'].coords.xy[0][-1], edge['geometry'].coords.xy[1][-1])
+            direction = None
+            fwd_azimuth_goal = calculate_bearing(p1[1], p1[0], p2[1], p2[0])
+            if fwd_azimuth_goal < 0:
+                fwd_azimuth_goal += 360
+            if fwd_azimuth_goal > 315 or fwd_azimuth_goal <= 45:
+                direction = 'north'
+            elif 45 < fwd_azimuth_goal <= 135:
+                direction = 'east'
+            elif 135 < fwd_azimuth_goal <= 225:
+                direction = 'south'
+            else:
+                direction = 'west'
+            edge['direction'] = direction
+    return G
+
+
 def graph_from_polygon(
     polygon,
     network_type="all_private",
@@ -434,6 +461,9 @@ def graph_from_polygon(
         if simplify:
             G_buff = simplification.simplify_graph(G_buff)
 
+        # Update edges' direction
+        G = update_edges_direction(G_buff)
+
         # truncate graph by original polygon to return graph within polygon
         # caller wants. don't simplify again: this allows us to retain
         # intersections along the street that may now only connect 2 street
@@ -464,6 +494,9 @@ def graph_from_polygon(
         # truncation distance, which would strip out the entire edge
         if simplify:
             G = simplification.simplify_graph(G)
+
+        # Update edges' direction
+        G = update_edges_direction(G)
 
     utils.log(f"graph_from_polygon returned graph with {len(G)} nodes and {len(G.edges)} edges")
     return G
@@ -498,6 +531,9 @@ def graph_from_xml(filepath, bidirectional=False, simplify=True, retain_all=Fals
     # simplify the graph topology as the last step
     if simplify:
         G = simplification.simplify_graph(G, strict=False)
+
+    # Update edges' direction
+    G = update_edges_direction(G)
 
     utils.log(f"graph_from_xml returned graph with {len(G)} nodes and {len(G.edges)} edges")
     return G
