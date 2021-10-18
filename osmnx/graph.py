@@ -3,7 +3,6 @@
 import itertools
 
 import networkx as nx
-from shapely import geometry
 from shapely.geometry import LineString
 from shapely.geometry import Point
 from shapely.geometry import MultiPolygon
@@ -20,6 +19,7 @@ from . import truncate
 from . import utils
 from . import utils_geo
 from . import utils_graph
+from . import route
 from .bearing import calculate_bearing
 from ._errors import EmptyOverpassResponse
 from ._version import __version__
@@ -356,6 +356,29 @@ def graph_from_place(
     return G
 
 
+def _process_route_relation(r, relations, ways, nodes):
+    route_nodes = route.process_route_links(r, relations, ways, nodes)
+    first_node = route_nodes[0]
+    last_node = route_nodes[-1]
+
+    # Find the direction between the first and the last route points
+    p1 = nodes[first_node]
+    p2 = nodes[last_node]
+    direction = None
+    fwd_azimuth_goal = calculate_bearing(p1['y'], p1['x'], p2['y'], p2['x'])
+    if fwd_azimuth_goal < 0:
+        fwd_azimuth_goal += 360
+    if fwd_azimuth_goal > 315 or fwd_azimuth_goal <= 45:
+        direction = 'north'
+    elif 45 < fwd_azimuth_goal <= 135:
+        direction = 'east'
+    elif 135 < fwd_azimuth_goal <= 225:
+        direction = 'south'
+    else:
+        direction = 'west'
+    route.process_route_relation_dir(r, relations, ways, nodes, parent_dir=direction)
+
+
 def update_edges_direction(G, inplace: bool = False):
     # Set the 'direction' attribute to the edge
     # if such attribute is missed. The direction is estimated
@@ -605,6 +628,7 @@ def _create_graph(response_jsons, retain_all=False, bidirectional=False):
     # add length (great-circle distance between nodes) attribute to each edge
     if len(G.edges) > 0:
         G = distance.add_edge_lengths(G)
+        G = route.add_route_dist(G)
 
     return G
 
@@ -645,7 +669,7 @@ def _convert_path(element):
     """
     path = {
         "osmid": element["id"],
-        "route_id": (element["id"],),
+        # "route_id": (element["id"],),
     }
 
     # remove any consecutive duplicate elements in the list of nodes
@@ -656,73 +680,6 @@ def _convert_path(element):
             if useful_tag in element["tags"]:
                 path[useful_tag] = element["tags"][useful_tag]
     return path
-
-
-def _assign_route_to_way(route_id, way):
-    if way is not None:
-        way['route_id'] = route_id
-
-
-def _process_route_relation_id(r, relations, ways, parent_id=None):
-    first_node = last_node = None
-    if r is None:
-        return first_node, last_node
-    for m in r['members']:
-        if m['type'] == 'relation':
-            f_, l_ = _process_route_relation_id(
-                relations.get(m['ref'], None), relations, ways, [r['id']])
-            if first_node is None:
-                first_node = f_
-            if l_:
-                last_node = l_
-        elif m['type'] == 'way':
-            edge = ways.get(m['ref'], None)
-            if edge:
-                # Extend the route_id
-                if parent_id is None:
-                    parent_id = tuple()
-                parent_id_ext = tuple([r['id'], *parent_id])
-                _assign_route_to_way(parent_id_ext, edge)
-                if first_node is None:
-                    first_node = edge['nodes'][0]
-                last_node = edge['nodes'][-1]
-    return first_node, last_node
-
-
-def _process_route_relation_dir(r, relations, ways, parent_dir=None):
-    if r is None:
-        return
-
-    parent_dir = r['tags'].get('direction', parent_dir)
-    for m in r['members']:
-        if m['type'] == 'relation':
-            _process_route_relation_dir(
-                relations.get(m['ref'], None), relations, ways, parent_dir)
-        elif m['type'] == 'way':
-            edge = ways.get(m['ref'], None)
-            if edge and parent_dir and ('direction' not in edge):
-                edge['direction'] = parent_dir
-
-
-def _process_route_relation(r, relations, ways, nodes):
-    first_node, last_node = _process_route_relation_id(r, relations, ways, parent_id=None)
-
-    # Find the direction between the first and the last route points
-    p1 = nodes[first_node]
-    p2 = nodes[last_node]
-    direction = None
-    fwd_azimuth_goal = calculate_bearing(p1['y'], p1['x'], p2['y'], p2['x'])
-    if fwd_azimuth_goal < 0:
-        fwd_azimuth_goal += 360
-    if fwd_azimuth_goal > 315 or fwd_azimuth_goal <= 45:
-        direction = 'north'
-    elif 45 < fwd_azimuth_goal <= 135:
-        direction = 'east'
-    elif 135 < fwd_azimuth_goal <= 225:
-        direction = 'south'
-    else:
-        direction = 'west'
-    _process_route_relation_dir(r, relations, ways, parent_dir=direction)
 
 
 def _convert_relation(element):
@@ -761,12 +718,13 @@ def _parse_nodes_paths(response_json):
         elif element["type"] == "relation":
             relations[element["id"]] = _convert_relation(element)
 
+    for p in paths:
+        _init_path_geometry(p, paths, nodes)
+        route.init_route_data(p, paths, nodes)
+
     for id, r in relations.items():
         if r["type"] == "relation" and r['tags'].get('route', None) == 'road':
             _process_route_relation(r, relations, paths, nodes=nodes)
-
-    for p in paths:
-        _init_path_geometry(p, paths, nodes)
 
     return nodes, paths
 

@@ -5,6 +5,7 @@ import networkx as nx
 from . import utils
 from . import utils_geo
 from . import utils_graph
+from . import route
 
 
 def truncate_graph_dist(G, source_node, max_dist=1000, weight="length", retain_all=False):
@@ -180,7 +181,8 @@ def truncate_graph_polygon(
     # now remove from the graph all those nodes that lie outside the polygon
     # make a copy to not mutate original graph object caller passed in
     G = G.copy()
-    G.remove_nodes_from(nodes_to_remove)
+    G = route.update_truncated_routes(G, set(nodes_to_remove))
+    G.remove_nodes_from(set(nodes_to_remove))
     utils.log(f"Removed {len(nodes_to_remove)} nodes outside polygon")
 
     if not retain_all:

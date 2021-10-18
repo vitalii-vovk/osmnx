@@ -12,6 +12,7 @@ from shapely.geometry import Polygon
 from . import stats
 from . import utils
 from . import utils_graph
+from . import route
 
 
 def _is_endpoint(G, node, strict=True):
@@ -238,6 +239,10 @@ def simplify_graph(G, strict=True, remove_rings=True):
     all_nodes_to_remove = []
     all_edges_to_add = []
 
+    # Map 
+    node_start_map = {}
+    node_end_map = {}
+
     # generate each path that needs to be simplified
     for path in _get_paths_to_simplify(G, strict=strict):
 
@@ -267,7 +272,7 @@ def simplify_graph(G, strict=True, remove_rings=True):
 
         for key in edge_attributes:
             # don't touch the length attribute, we'll sum it at the end
-            if key not in ("length", "geometry"):
+            if key not in ("length", "geometry", "route"):
                 if len(set(edge_attributes[key])) == 1:
                     # if there's only 1 unique value in this attribute list,
                     # consolidate it to the single value (the zero-th)
@@ -281,6 +286,14 @@ def simplify_graph(G, strict=True, remove_rings=True):
             [Point((G.nodes[node]["x"], G.nodes[node]["y"])) for node in path]
         )
         edge_attributes["length"] = sum(edge_attributes["length"])
+        if "route" in edge_attributes:
+            edge_attributes["route"] = {
+                key: val for elem in edge_attributes["route"] for key, val in elem.items()
+            }
+        # edge_attributes["route_id"] = edge_attributes["route_id"][0]
+        for p in path:
+            node_start_map[p] = path[0]
+            node_end_map[p] = path[-1]
 
         # add the nodes and edges to their lists for processing at the end
         all_nodes_to_remove.extend(path[1:-1])
@@ -291,12 +304,14 @@ def simplify_graph(G, strict=True, remove_rings=True):
     # for each edge to add in the list we assembled, create a new edge between
     # the origin and destination
     for edge in all_edges_to_add:
-        attr = dict(**edge["attr_dict"])
+        # attr = dict(**edge["attr_dict"])
         G.update(edges=[
             [edge["origin"], edge["destination"], 0, edge["attr_dict"]]
         ])
         # G.add_edge(edge["origin"], edge["destination"], **edge["attr_dict"])
 
+    # Update routes
+    route.update_truncated_routes(G, set(all_nodes_to_remove))
     # finally remove all the interstitial nodes between the new edges
     G.remove_nodes_from(set(all_nodes_to_remove))
 
