@@ -172,8 +172,13 @@ def _plot_folium(gdf, m, popup_attribute, tiles, zoom, fit_bounds, **kwargs):
     centroid = (y[0], x[0])
 
     # create the folium web map if one wasn't passed-in
+    margs = {}
+    map_attrs = ['max_zoom', 'attr']
+    for a in map_attrs:
+        if a in kwargs:
+            margs[a] = kwargs.pop(a)
     if m is None:
-        m = folium.Map(location=centroid, zoom_start=zoom, tiles=tiles)
+        m = folium.Map(location=centroid, zoom_start=zoom, tiles=tiles, **margs)
 
     # identify the geometry and popup columns
     if popup_attribute is None:
