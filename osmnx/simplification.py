@@ -12,6 +12,7 @@ from shapely.geometry import Polygon
 from . import stats
 from . import utils
 from . import utils_graph
+from .bearing import calculate_bearing
 
 
 def _is_endpoint(G, node, strict=True):
@@ -284,20 +285,18 @@ def simplify_graph(G, strict=True, remove_rings=True):
         # by analyzing the direction between the start and end nodes,
         # and quantized to the four values: North, West, South, East
         if 'direction' not in edge_attributes:
-            #See: https://stackoverflow.com/questions/54873868/python-calculate-bearing-between-two-lat-long
-            geodesic = pyproj.Geod(ellps='WGS84')
-            #Find azimuth of the two points by using their indexes
+            # Find azimuth of the two points by using their indexes
             p1 = G.nodes[path[0]]
-            p2 = G.nodes[path[1]]
-            fwd_azimuth_goal, _, _ =\
-                geodesic.inv(p1['x'], p1['y'], p2['x'], p2['y'])
+            p2 = G.nodes[path[-1]]
+            direction = None
+            fwd_azimuth_goal = calculate_bearing(p1['y'], p1['x'], p2['y'], p2['x'])
             if fwd_azimuth_goal < 0:
                 fwd_azimuth_goal += 360
             if fwd_azimuth_goal > 315 or fwd_azimuth_goal <= 45:
                 direction = 'north'
-            if 45 < fwd_azimuth_goal <= 135:
+            elif 45 < fwd_azimuth_goal <= 135:
                 direction = 'east'
-            if 135 < fwd_azimuth_goal <= 225:
+            elif 135 < fwd_azimuth_goal <= 225:
                 direction = 'south'
             else:
                 direction = 'west'
