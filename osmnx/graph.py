@@ -20,7 +20,6 @@ from . import utils
 from . import utils_geo
 from . import utils_graph
 from . import route
-from .bearing import calculate_bearing
 from ._errors import EmptyOverpassResponse
 from ._version import __version__
 
@@ -362,20 +361,13 @@ def _process_route_relation(r, relations, ways, nodes):
     last_node = route_nodes[-1]
 
     # Find the direction between the first and the last route points
-    p1 = nodes[first_node]
-    p2 = nodes[last_node]
-    direction = None
-    fwd_azimuth_goal = calculate_bearing(p1['y'], p1['x'], p2['y'], p2['x'])
-    if fwd_azimuth_goal < 0:
-        fwd_azimuth_goal += 360
-    if fwd_azimuth_goal > 315 or fwd_azimuth_goal <= 45:
-        direction = 'north'
-    elif 45 < fwd_azimuth_goal <= 135:
-        direction = 'east'
-    elif 135 < fwd_azimuth_goal <= 225:
-        direction = 'south'
+    if 'direction' in r['tags']:
+        direction = r['tags']['direction']
     else:
-        direction = 'west'
+        direction = route.get_way_dir(first_node, last_node, nodes)
+    direction = {
+        r['id']: direction,
+    }
     route.process_route_relation_dir(r, relations, ways, nodes, parent_dir=direction)
 
 
@@ -391,21 +383,7 @@ def update_edges_direction(G, inplace: bool = False):
         edge = G.edges[edge_id]
         if 'direction' not in edge and 'geometry' in edge:
             # Find azimuth of the two points by using their indexes
-            p1 = (edge['geometry'].coords.xy[0][0], edge['geometry'].coords.xy[1][0])
-            p2 = (edge['geometry'].coords.xy[0][-1], edge['geometry'].coords.xy[1][-1])
-            direction = None
-            fwd_azimuth_goal = calculate_bearing(p1[1], p1[0], p2[1], p2[0])
-            if fwd_azimuth_goal < 0:
-                fwd_azimuth_goal += 360
-            if fwd_azimuth_goal > 315 or fwd_azimuth_goal <= 45:
-                direction = 'north'
-            elif 45 < fwd_azimuth_goal <= 135:
-                direction = 'east'
-            elif 135 < fwd_azimuth_goal <= 225:
-                direction = 'south'
-            else:
-                direction = 'west'
-            edge['direction'] = direction
+            edge['direction'] = route.get_edge_dir(edge)
     return G
 
 

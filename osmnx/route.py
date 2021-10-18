@@ -1,5 +1,39 @@
 from tqdm import tqdm
+import copy
 import itertools
+
+from . import bearing
+
+
+def get_road_dir(lat1, lon1, lat2, lon2):
+    fwd_azimuth_goal = bearing.calculate_bearing(lat1, lon1, lat2, lon2)
+    if fwd_azimuth_goal < 0:
+        fwd_azimuth_goal += 360
+    if fwd_azimuth_goal > 315 or fwd_azimuth_goal <= 45:
+        direction = 'north'
+    elif 45 < fwd_azimuth_goal <= 135:
+        direction = 'east'
+    elif 135 < fwd_azimuth_goal <= 225:
+        direction = 'south'
+    else:
+        direction = 'west'
+    return direction
+
+
+def get_way_dir(first_node, last_node, nodes):
+    # Find the direction between the first and the last route points
+    p1 = nodes[first_node]
+    p2 = nodes[last_node]
+    direction = get_road_dir(p1['y'], p1['x'], p2['y'], p2['x'])
+    return direction
+
+
+def get_edge_dir(edge):
+    # Find the direction between the first and the last route points
+    p1 = (edge['geometry'].coords.xy[0][0], edge['geometry'].coords.xy[1][0])
+    p2 = (edge['geometry'].coords.xy[0][-1], edge['geometry'].coords.xy[1][-1])
+    direction = get_road_dir(p1[1], p1[0], p2[1], p2[0])
+    return direction
 
 
 def add_route_dist(G, inplace=True):
@@ -141,7 +175,7 @@ def update_truncated_routes(G, nodes_to_be_removed, inplace=True):
     for n in tqdm(nodes_to_be_removed, desc='Update truncated routes...'):
         node = G.nodes[n]
         for rid in node.get('route', {}):
-            route = get_full_route(G, n, rid)
+            # route = get_full_route(G, n, rid)
             # Update prev/next
             next_id = node['route'][rid]['next']
             prev_id = node['route'][rid]['prev']
@@ -179,18 +213,18 @@ def update_truncated_routes(G, nodes_to_be_removed, inplace=True):
     return G
 
 
-def process_route_relation_id(r, relations, ways, parent_id=None):
+def process_route_relation_id(r, relations, ways, parent_id=tuple(), parent_name=tuple()):
     first_node = last_node = None
     if r is None:
         return first_node, last_node
-    for m in r['members']:
-        if parent_id is None:
-            parent_id = tuple()
-        parent_id_ext = tuple([r['id'], *parent_id])
 
+    parent_id_ext = tuple([r['id'], *parent_id])
+    parent_name_ext = tuple([r.get('name', ''), *parent_name])
+
+    for m in r['members']:
         if m['type'] == 'relation':
             f_, l_ = process_route_relation_id(
-                relations.get(m['ref'], None), relations, ways, parent_id_ext)
+                relations.get(m['ref'], None), relations, ways, parent_id_ext, parent_name_ext)
             if first_node is None:
                 first_node = f_
             if l_:
@@ -200,6 +234,7 @@ def process_route_relation_id(r, relations, ways, parent_id=None):
             if way:
                 # Extend the route_id
                 way['route_id'] = parent_id_ext
+                way['route_name'] = parent_name_ext
                 if first_node is None:
                     first_node = way['nodes'][0]
                 last_node = way['nodes'][-1]
@@ -210,34 +245,51 @@ def process_route_relation_dir(r, relations, ways, nodes, parent_dir=None):
     if r is None:
         return
 
-    parent_dir = r['tags'].get('direction', parent_dir)
     rid = r['id']
+    route_dir = r['tags'].get('direction', None)
+    if route_dir:
+        if parent_dir is None:
+            parent_dir = {}
+        parent_dir[rid] = route_dir
     for m in r['members']:
+        pdir = copy.deepcopy(parent_dir)
         if m['type'] == 'relation':
             process_route_relation_dir(
-                relations.get(m['ref'], None), relations, ways, nodes, parent_dir)
+                relations.get(m['ref'], None), relations, ways, nodes, pdir)
         elif m['type'] == 'way':
             way = ways.get(m['ref'], None)
             if way is None:
                 continue
             wid = way['osmid']
-            if parent_dir and ('direction' not in way):
-                way['direction'] = parent_dir
+            # Compute the direction attribute value
+            if 'direction' not in way:
+                way['direction'] = get_way_dir(way['nodes'][0], way['nodes'][-1], nodes)
             if 'route' not in way:
                 way['route'] = {}
-            if rid not in way['route']:
-                way['route'][rid] = {}
-            way['route'][rid]['direction'] = parent_dir
+            if wid not in way['route']:
+                way['route'][wid] = {}
+            way['route'][wid]['direction'] = way['direction']
+            if pdir:
+                for r in pdir:
+                    if r not in way['route']:
+                        way['route'][r] = {}
+                    if 'direction' not in way['route'][r]:
+                        way['route'][r]['direction'] = pdir[r]
+
             for n in way['nodes']:
                 node = nodes[n]
                 if 'route' not in node:
                     node['route'] = {}
-                if rid not in node['route']:
-                    node['route'][rid] = {}
-                node['route'][rid]['direction'] = parent_dir
                 if wid not in node['route']:
                     node['route'][wid] = {}
                 node['route'][wid]['direction'] = way['direction']
+
+                if pdir:
+                    for r in pdir:
+                        if r not in node['route']:
+                            node['route'][r] = {}
+                        if 'direction' not in node['route'][r]:
+                            node['route'][r]['direction'] = pdir[r]
 
 
 def update_nodes_with_route_id(route_nodes, rid, nodes, skip_missing: bool = True):
@@ -271,7 +323,18 @@ def update_nodes_with_route_id(route_nodes, rid, nodes, skip_missing: bool = Tru
         processed_nodes.add(n)
 
 
-def process_route_links(r, relations, ways, nodes, parent_route_id=tuple(), skip_missing: bool = True):
+def process_route_links(
+    r,
+    relations,
+    ways,
+    nodes,
+    parent_route_id=tuple(),
+    parent_route_name=tuple(),
+    parent_route_alt_name=tuple(),
+    parent_route_off_name=tuple(),
+    parent_route_ref=tuple(),
+    skip_missing: bool = True
+):
     """Updates route links withi the given relation `r`
     and returs the list of ways in this relation
 
@@ -280,6 +343,8 @@ def process_route_links(r, relations, ways, nodes, parent_route_id=tuple(), skip
         relations (dict): dictionary of all relations
         ways (dict): dictionary of all ways
         parent_route_id (tuple, optional): route id of the up-level route.
+            Defaults to tuple()
+        parent_route_name (tuple, optional): route name of the up-level route.
             Defaults to tuple()
         drop_missing (bool, optional): if True, then skip nodes that are
             missing in the `nodes`
@@ -293,25 +358,51 @@ def process_route_links(r, relations, ways, nodes, parent_route_id=tuple(), skip
 
     route_nodes = []
     rid = r['id']
+    rname = r['tags'].get('name', '')
+    raltname = r['tags'].get('alt_name', '')
+    roffname = r['tags'].get('official_name', '')
+    rref = r['tags']['ref']
     for m in r['members']:
         route_id = (rid, *parent_route_id)
+        route_name = (rname, *parent_route_name)
+        route_aname = (raltname, *parent_route_alt_name)
+        route_oname = (roffname, *parent_route_off_name)
+        route_ref = (rref, *parent_route_ref)
         if m['type'] == 'relation':
             route_nodes.extend(
                 process_route_links(
                     relations.get(m['ref'], None),
-                    relations, ways, nodes, route_id
+                    relations, ways, nodes,
+                    route_id,
+                    route_name, route_aname, route_oname,
+                    route_ref
                 )
             )
         elif m['type'] == 'way':
             way = ways.get(m['ref'], None)
             if not way:
                 continue
-            wid = way['osmid']
             way_nodes = way['nodes']
             route_nodes.extend(way_nodes)
-            if 'route_id' not in way:
-                way['route_id'] = (wid, )
-            way['route_id'] = (*way['route_id'], *route_id)
+
+            wid = way['osmid']
+            wname = way['name']
+            waname = way.get('alt_name', '')
+            woname = way.get('official_name', '')
+            wref = way.get('ref', '')
+
+            way_route_id = way.get('route_id', (wid, ))
+            way_route_name = way.get('route_name', (wname, ))
+            way_route_aname = way.get('route_alt_name', (waname, ))
+            way_route_oname = way.get('route_off_name', (woname, ))
+            way_route_ref = way.get('route_ref', (wref, ))
+
+            way['route_id'] = (*way_route_id, *route_id)
+            way['route_name'] = (*way_route_name, *route_name)
+            way['route_alt_name'] = (*way_route_aname, *route_aname)
+            way['route_off_name'] = (*way_route_oname, *route_oname)
+            way['route_ref'] = (*way_route_ref, *route_ref)
+
             update_nodes_with_route_id(way_nodes, wid, nodes, skip_missing)
 
     # Remove duplicate nodes (at ways/relations joints)
@@ -326,10 +417,23 @@ def process_route_links(r, relations, ways, nodes, parent_route_id=tuple(), skip
     return route_nodes
 
 
-def init_route_data(p, path, nodes, skip_missing: bool = True):
-    way = path[p]
+def init_route_data(p, paths, nodes, skip_missing: bool = True):
+    way = paths[p]
     if 'route_id' in way:
         return
     wid = way['osmid']
     way['route_id'] = (wid,)
+    way['route_name'] = (way.get('name', ''),)
+    way['route_alt_name'] = (way.get('alt_name', ''),)
+    way['route_off_name'] = (way.get('official_name', ''),)
+    if 'ref' in way:
+        way['route_ref'] = (way.get('ref', ''),)
+    wnodes = way.get('nodes', None)
+    if nodes:
+        first_node, last_node = wnodes[0], wnodes[-1]
+        way['route'] = {
+            wid: {
+                'direction': get_way_dir(first_node, last_node, nodes)
+            }
+        }
     update_nodes_with_route_id(way['nodes'], wid, nodes, skip_missing)

@@ -11,7 +11,7 @@ import pandas as pd
 from shapely.geometry import LineString
 from shapely.geometry import Point
 
-from .route import update_truncated_routes
+from . import route
 
 from . import utils
 
@@ -298,7 +298,7 @@ def remove_isolated_nodes(G):
     # get the set of all isolated nodes, then remove them
     isolated_nodes = {node for node, degree in G.degree() if degree < 1}
 
-    G = update_truncated_routes(G, isolated_nodes, inplace=True)
+    G = route.update_truncated_routes(G, isolated_nodes, inplace=True)
     G.remove_nodes_from(isolated_nodes)
     utils.log(f"Removed {len(isolated_nodes)} isolated nodes")
     return G

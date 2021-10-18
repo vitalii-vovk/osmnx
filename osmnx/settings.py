@@ -33,6 +33,8 @@ useful_tags_way = [
     "lanes",
     "ref",
     "name",
+    "alt_name",
+    "official_name",
     "highway",
     "maxspeed",
     "service",
@@ -42,6 +44,7 @@ useful_tags_way = [
     "width",
     "est_width",
     "junction",
+    "turn",
 ]
 
 # tags and attributes for generating an OSM XML file

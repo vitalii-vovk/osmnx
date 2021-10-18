@@ -5,6 +5,7 @@ import logging as lg
 import geopandas as gpd
 import networkx as nx
 import pyproj
+import numpy as np
 from shapely.geometry import LineString
 from shapely.geometry import Point
 from shapely.geometry import Polygon
@@ -272,7 +273,10 @@ def simplify_graph(G, strict=True, remove_rings=True):
 
         for key in edge_attributes:
             # don't touch the length attribute, we'll sum it at the end
-            if key not in ("length", "geometry", "route"):
+            excluded_keys = (
+                "length", "geometry", "route", 'route_id',
+                'route_name', 'route_alt_name', 'route_off_name', 'route_ref')
+            if key not in excluded_keys:
                 if len(set(edge_attributes[key])) == 1:
                     # if there's only 1 unique value in this attribute list,
                     # consolidate it to the single value (the zero-th)
@@ -290,7 +294,24 @@ def simplify_graph(G, strict=True, remove_rings=True):
             edge_attributes["route"] = {
                 key: val for elem in edge_attributes["route"] for key, val in elem.items()
             }
-        # edge_attributes["route_id"] = edge_attributes["route_id"][0]
+        if "route_id" in edge_attributes:
+            ids = [item for sublist in edge_attributes['route_id'] for item in sublist]
+            _, idx = np.unique(ids, return_index=True)
+            idx = np.sort(idx)
+            edge_attributes["route_id"] = [ids[i] for i in idx]
+            if "route_name" in edge_attributes:
+                names = [item for sublist in edge_attributes['route_name'] for item in sublist]
+                edge_attributes["route_name"] = [names[i] for i in idx]
+            if "route_alt_name" in edge_attributes:
+                refs = [item for sublist in edge_attributes['route_alt_name'] for item in sublist]
+                edge_attributes["route_alt_name"] = [refs[i] for i in idx]
+            if "route_off_name" in edge_attributes:
+                refs = [item for sublist in edge_attributes['route_off_name'] for item in sublist]
+                edge_attributes["route_off_name"] = [refs[i] for i in idx]
+            if "route_ref" in edge_attributes:
+                refs = [item for sublist in edge_attributes['route_ref'] for item in sublist]
+                edge_attributes["route_ref"] = [refs[i] for i in idx]
+
         for p in path:
             node_start_map[p] = path[0]
             node_end_map[p] = path[-1]
