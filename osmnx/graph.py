@@ -3,6 +3,8 @@
 import itertools
 
 import networkx as nx
+from shapely.geometry import LineString
+from shapely.geometry import Point
 from shapely.geometry import MultiPolygon
 from shapely.geometry import Polygon
 
@@ -17,6 +19,8 @@ from . import truncate
 from . import utils
 from . import utils_geo
 from . import utils_graph
+from . import route
+from .bearing import calculate_bearing
 from ._errors import EmptyOverpassResponse
 from ._version import __version__
 
@@ -352,6 +356,59 @@ def graph_from_place(
     return G
 
 
+def _process_route_relation(r, relations, ways, nodes):
+    route_nodes = route.process_route_links(r, relations, ways, nodes)
+    first_node = route_nodes[0]
+    last_node = route_nodes[-1]
+
+    # Find the direction between the first and the last route points
+    p1 = nodes[first_node]
+    p2 = nodes[last_node]
+    direction = None
+    fwd_azimuth_goal = calculate_bearing(p1['y'], p1['x'], p2['y'], p2['x'])
+    if fwd_azimuth_goal < 0:
+        fwd_azimuth_goal += 360
+    if fwd_azimuth_goal > 315 or fwd_azimuth_goal <= 45:
+        direction = 'north'
+    elif 45 < fwd_azimuth_goal <= 135:
+        direction = 'east'
+    elif 135 < fwd_azimuth_goal <= 225:
+        direction = 'south'
+    else:
+        direction = 'west'
+    route.process_route_relation_dir(r, relations, ways, nodes, parent_dir=direction)
+
+
+def update_edges_direction(G, inplace: bool = False):
+    # Set the 'direction' attribute to the edge
+    # if such attribute is missed. The direction is estimated
+    # by analyzing the direction between the start and end nodes,
+    # and quantized to the four values: North, West, South, East
+    if not inplace:
+        G = G.copy()
+
+    for edge_id in G.edges:
+        edge = G.edges[edge_id]
+        if 'direction' not in edge and 'geometry' in edge:
+            # Find azimuth of the two points by using their indexes
+            p1 = (edge['geometry'].coords.xy[0][0], edge['geometry'].coords.xy[1][0])
+            p2 = (edge['geometry'].coords.xy[0][-1], edge['geometry'].coords.xy[1][-1])
+            direction = None
+            fwd_azimuth_goal = calculate_bearing(p1[1], p1[0], p2[1], p2[0])
+            if fwd_azimuth_goal < 0:
+                fwd_azimuth_goal += 360
+            if fwd_azimuth_goal > 315 or fwd_azimuth_goal <= 45:
+                direction = 'north'
+            elif 45 < fwd_azimuth_goal <= 135:
+                direction = 'east'
+            elif 135 < fwd_azimuth_goal <= 225:
+                direction = 'south'
+            else:
+                direction = 'west'
+            edge['direction'] = direction
+    return G
+
+
 def graph_from_polygon(
     polygon,
     network_type="all_private",
@@ -433,6 +490,9 @@ def graph_from_polygon(
         if simplify:
             G_buff = simplification.simplify_graph(G_buff)
 
+        # Update edges' direction
+        G_buff = update_edges_direction(G_buff)
+
         # truncate graph by original polygon to return graph within polygon
         # caller wants. don't simplify again: this allows us to retain
         # intersections along the street that may now only connect 2 street
@@ -463,6 +523,9 @@ def graph_from_polygon(
         # truncation distance, which would strip out the entire edge
         if simplify:
             G = simplification.simplify_graph(G)
+
+        # Update edges' direction
+        G = update_edges_direction(G)
 
     utils.log(f"graph_from_polygon returned graph with {len(G)} nodes and {len(G.edges)} edges")
     return G
@@ -497,6 +560,9 @@ def graph_from_xml(filepath, bidirectional=False, simplify=True, retain_all=Fals
     # simplify the graph topology as the last step
     if simplify:
         G = simplification.simplify_graph(G, strict=False)
+
+    # Update edges' direction
+    G = update_edges_direction(G)
 
     utils.log(f"graph_from_xml returned graph with {len(G)} nodes and {len(G.edges)} edges")
     return G
@@ -562,6 +628,7 @@ def _create_graph(response_jsons, retain_all=False, bidirectional=False):
     # add length (great-circle distance between nodes) attribute to each edge
     if len(G.edges) > 0:
         G = distance.add_edge_lengths(G)
+        G = route.add_route_dist(G)
 
     return G
 
@@ -602,7 +669,7 @@ def _convert_path(element):
     """
     path = {
         "osmid": element["id"],
-        "route_id": (element["id"],),
+        # "route_id": (element["id"],),
     }
 
     # remove any consecutive duplicate elements in the list of nodes
@@ -615,25 +682,15 @@ def _convert_path(element):
     return path
 
 
-def _assign_route_to_way(route_id, way):
-    if way is not None:
-        way['route_id'] = route_id
-
-
-def _process_route_relation(r, relations, ways, parent_id=None):
-    for m in r['members']:
-        if m['type'] == 'relation':
-            if m['ref'] in relations:
-                _process_route_relation(relations[m['ref']], relations, ways, [r['id']])
-        elif m['type'] == 'way':
-            if parent_id is None:
-                parent_id = tuple()
-            parent_id = tuple(r['id'], *parent_id)
-            _assign_route_to_way(parent_id, ways.get(m['ref'], None))
-
-
 def _convert_relation(element):
     return element
+
+
+def _init_path_geometry(p, path, nodes):
+    if "geometry" not in path[p]:
+        path[p]["geometry"] = LineString(
+            [Point((nodes[node]["x"], nodes[node]["y"])) for node in path[p]["nodes"]]
+        )
 
 
 def _parse_nodes_paths(response_json):
@@ -661,9 +718,13 @@ def _parse_nodes_paths(response_json):
         elif element["type"] == "relation":
             relations[element["id"]] = _convert_relation(element)
 
+    for p in paths:
+        _init_path_geometry(p, paths, nodes)
+        route.init_route_data(p, paths, nodes)
+
     for id, r in relations.items():
         if r["type"] == "relation" and r['tags'].get('route', None) == 'road':
-            _process_route_relation(r, relations, paths)
+            _process_route_relation(r, relations, paths, nodes=nodes)
 
     return nodes, paths
 

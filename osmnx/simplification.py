@@ -12,6 +12,7 @@ from shapely.geometry import Polygon
 from . import stats
 from . import utils
 from . import utils_graph
+from . import route
 
 
 def _is_endpoint(G, node, strict=True):
@@ -70,21 +71,23 @@ def _is_endpoint(G, node, strict=True):
     elif not strict:
         # non-strict mode: do its incident edges have different OSM IDs?
         osmids = []
+        route_ids = []
 
         # add all the edge OSM IDs for incoming edges
         for u in G.predecessors(node):
             for key in G[u][node]:
                 osmids.append(G.edges[u, node, key]["osmid"])
+                route_ids.append(G.edges[u, node, key]["route_id"])
 
         # add all the edge OSM IDs for outgoing edges
         for v in G.successors(node):
             for key in G[node][v]:
                 osmids.append(G.edges[node, v, key]["osmid"])
+                route_ids.append(G.edges[node, v, key]["route_id"])
 
         # if there is more than 1 OSM ID in the list of edge OSM IDs then it is
         # an endpoint, if not, it isn't
-        return len(set(osmids)) > 1
-
+        return len(set(osmids)) > 1 or len(set(route_ids)) > 1
     # if none of the preceding rules returned true, then it is not an endpoint
     else:
         return False
@@ -236,6 +239,10 @@ def simplify_graph(G, strict=True, remove_rings=True):
     all_nodes_to_remove = []
     all_edges_to_add = []
 
+    # Map 
+    node_start_map = {}
+    node_end_map = {}
+
     # generate each path that needs to be simplified
     for path in _get_paths_to_simplify(G, strict=strict):
 
@@ -265,43 +272,28 @@ def simplify_graph(G, strict=True, remove_rings=True):
 
         for key in edge_attributes:
             # don't touch the length attribute, we'll sum it at the end
-            if len(set(edge_attributes[key])) == 1 and key != "length":
-                # if there's only 1 unique value in this attribute list,
-                # consolidate it to the single value (the zero-th)
-                edge_attributes[key] = edge_attributes[key][0]
-            elif key != "length":
-                # otherwise, if there are multiple values, keep one of each value
-                edge_attributes[key] = list(set(edge_attributes[key]))
+            if key not in ("length", "geometry", "route"):
+                if len(set(edge_attributes[key])) == 1:
+                    # if there's only 1 unique value in this attribute list,
+                    # consolidate it to the single value (the zero-th)
+                    edge_attributes[key] = edge_attributes[key][0]
+                else:
+                    # otherwise, if there are multiple values, keep one of each value
+                    edge_attributes[key] = list(set(edge_attributes[key]))
 
         # construct the geometry and sum the lengths of the segments
         edge_attributes["geometry"] = LineString(
             [Point((G.nodes[node]["x"], G.nodes[node]["y"])) for node in path]
         )
         edge_attributes["length"] = sum(edge_attributes["length"])
-
-        # Set the 'direction' attribute to the edge
-        # if such attribute is missed. The direction is estimated
-        # by analyzing the direction between the start and end nodes,
-        # and quantized to the four values: North, West, South, East
-        if 'direction' not in edge_attributes:
-            #See: https://stackoverflow.com/questions/54873868/python-calculate-bearing-between-two-lat-long
-            geodesic = pyproj.Geod(ellps='WGS84')
-            #Find azimuth of the two points by using their indexes
-            p1 = G.nodes[path[0]]
-            p2 = G.nodes[path[1]]
-            fwd_azimuth_goal, _, _ =\
-                geodesic.inv(p1['x'], p1['y'], p2['x'], p2['y'])
-            if fwd_azimuth_goal < 0:
-                fwd_azimuth_goal += 360
-            if fwd_azimuth_goal > 315 or fwd_azimuth_goal <= 45:
-                direction = 'north'
-            if 45 < fwd_azimuth_goal <= 135:
-                direction = 'east'
-            if 135 < fwd_azimuth_goal <= 225:
-                direction = 'south'
-            else:
-                direction = 'west'
-            edge_attributes['direction'] = direction
+        if "route" in edge_attributes:
+            edge_attributes["route"] = {
+                key: val for elem in edge_attributes["route"] for key, val in elem.items()
+            }
+        # edge_attributes["route_id"] = edge_attributes["route_id"][0]
+        for p in path:
+            node_start_map[p] = path[0]
+            node_end_map[p] = path[-1]
 
         # add the nodes and edges to their lists for processing at the end
         all_nodes_to_remove.extend(path[1:-1])
@@ -312,12 +304,14 @@ def simplify_graph(G, strict=True, remove_rings=True):
     # for each edge to add in the list we assembled, create a new edge between
     # the origin and destination
     for edge in all_edges_to_add:
-        attr = dict(**edge["attr_dict"])
+        # attr = dict(**edge["attr_dict"])
         G.update(edges=[
             [edge["origin"], edge["destination"], 0, edge["attr_dict"]]
         ])
         # G.add_edge(edge["origin"], edge["destination"], **edge["attr_dict"])
 
+    # Update routes
+    route.update_truncated_routes(G, set(all_nodes_to_remove))
     # finally remove all the interstitial nodes between the new edges
     G.remove_nodes_from(set(all_nodes_to_remove))
 
