@@ -12,7 +12,6 @@ from shapely.geometry import Polygon
 from . import stats
 from . import utils
 from . import utils_graph
-from .bearing import calculate_bearing
 
 
 def _is_endpoint(G, node, strict=True):
@@ -268,13 +267,14 @@ def simplify_graph(G, strict=True, remove_rings=True):
 
         for key in edge_attributes:
             # don't touch the length attribute, we'll sum it at the end
-            if len(set(edge_attributes[key])) == 1 and key != "length":
-                # if there's only 1 unique value in this attribute list,
-                # consolidate it to the single value (the zero-th)
-                edge_attributes[key] = edge_attributes[key][0]
-            elif key != "length":
-                # otherwise, if there are multiple values, keep one of each value
-                edge_attributes[key] = list(set(edge_attributes[key]))
+            if key not in ("length", "geometry"):
+                if len(set(edge_attributes[key])) == 1:
+                    # if there's only 1 unique value in this attribute list,
+                    # consolidate it to the single value (the zero-th)
+                    edge_attributes[key] = edge_attributes[key][0]
+                else:
+                    # otherwise, if there are multiple values, keep one of each value
+                    edge_attributes[key] = list(set(edge_attributes[key]))
 
         # construct the geometry and sum the lengths of the segments
         edge_attributes["geometry"] = LineString(

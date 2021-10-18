@@ -3,6 +3,9 @@
 import itertools
 
 import networkx as nx
+from shapely import geometry
+from shapely.geometry import LineString
+from shapely.geometry import Point
 from shapely.geometry import MultiPolygon
 from shapely.geometry import Polygon
 
@@ -353,11 +356,14 @@ def graph_from_place(
     return G
 
 
-def update_edges_direction(G):
+def update_edges_direction(G, inplace: bool = False):
     # Set the 'direction' attribute to the edge
     # if such attribute is missed. The direction is estimated
     # by analyzing the direction between the start and end nodes,
     # and quantized to the four values: North, West, South, East
+    if not inplace:
+        G = G.copy()
+
     for edge_id in G.edges:
         edge = G.edges[edge_id]
         if 'direction' not in edge and 'geometry' in edge:
@@ -462,7 +468,7 @@ def graph_from_polygon(
             G_buff = simplification.simplify_graph(G_buff)
 
         # Update edges' direction
-        G = update_edges_direction(G_buff)
+        G_buff = update_edges_direction(G_buff)
 
         # truncate graph by original polygon to return graph within polygon
         # caller wants. don't simplify again: this allows us to retain
@@ -723,6 +729,13 @@ def _convert_relation(element):
     return element
 
 
+def _init_path_geometry(p, path, nodes):
+    if "geometry" not in path[p]:
+        path[p]["geometry"] = LineString(
+            [Point((nodes[node]["x"], nodes[node]["y"])) for node in path[p]["nodes"]]
+        )
+
+
 def _parse_nodes_paths(response_json):
     """
     Construct dicts of nodes and paths from an Overpass response.
@@ -751,6 +764,9 @@ def _parse_nodes_paths(response_json):
     for id, r in relations.items():
         if r["type"] == "relation" and r['tags'].get('route', None) == 'road':
             _process_route_relation(r, relations, paths, nodes=nodes)
+
+    for p in paths:
+        _init_path_geometry(p, paths, nodes)
 
     return nodes, paths
 
