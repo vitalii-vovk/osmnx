@@ -597,16 +597,16 @@ def _create_graph(response_jsons, retain_all=False, bidirectional=False):
     # add each osm way (ie, a path of edges) to the graph
     _add_paths(G, paths.values(), bidirectional)
 
+    # add length (great-circle distance between nodes) attribute to each edge
+    if len(G.edges) > 0:
+        G = distance.add_edge_lengths(G)
+        G = route.add_route_dist(G)
+
     # retain only the largest connected component if retain_all is False
     if not retain_all:
         G = utils_graph.get_largest_component(G)
 
     utils.log(f"Created graph with {len(G)} nodes and {len(G.edges)} edges")
-
-    # add length (great-circle distance between nodes) attribute to each edge
-    if len(G.edges) > 0:
-        G = distance.add_edge_lengths(G)
-        G = route.add_route_dist(G)
 
     return G
 
