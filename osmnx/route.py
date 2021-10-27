@@ -303,8 +303,8 @@ def update_nodes_with_route_id(route_nodes, rid, nodes, skip_missing: bool = Tru
         if n in processed_nodes:
             continue
 
-        next_id = route_nodes[i+1] if i < len(route_nodes)-1 else None
-        prev_id = None if i == 0 else route_nodes[i-1]
+        next_id = route_nodes[i + 1] if i < len(route_nodes) - 1 else None
+        prev_id = None if i == 0 else route_nodes[i - 1]
 
         node = nodes[n]
         if 'route' not in node:
@@ -358,10 +358,10 @@ def process_route_links(
 
     route_nodes = []
     rid = r['id']
-    rname = r['tags'].get('name', '').upper()
-    raltname = r['tags'].get('alt_name', '').upper()
-    roffname = r['tags'].get('official_name', '').upper()
-    rref = str(r['tags']['ref']).upper()
+    rname = r['tags'].get('name', '').lower()
+    raltname = r['tags'].get('alt_name', '').lower()
+    roffname = r['tags'].get('official_name', '').lower()
+    rref = str(r['tags']['ref']).lower()
     for m in r['members']:
         route_id = (rid, *parent_route_id)
         route_name = (rname, *parent_route_name)
@@ -386,10 +386,10 @@ def process_route_links(
             route_nodes.extend(way_nodes)
 
             wid = way['osmid']
-            wname = way['name'].upper()
-            waname = way.get('alt_name', '').upper()
-            woname = way.get('official_name', '').upper()
-            wref = str(way.get('ref', '')).upper()
+            wname = way['name'].lower()
+            waname = way.get('alt_name', '').lower()
+            woname = way.get('official_name', '').lower()
+            wref = str(way.get('ref', '')).lower()
 
             way_route_id = way.get('route_id', (wid, ))
             way_route_name = way.get('route_name', (wname, ))
@@ -423,11 +423,11 @@ def init_route_data(p, paths, nodes, skip_missing: bool = True):
         return
     wid = way['osmid']
     way['route_id'] = (wid,)
-    way['route_name'] = (way.get('name', '').upper(),)
-    way['route_alt_name'] = (way.get('alt_name', '').upper(),)
-    way['route_off_name'] = (way.get('official_name', '').upper(),)
-    if 'ref' in way:
-        way['route_ref'] = (str(way.get('ref', '')).upper(),)
+    way['route_name'] = (way.get('name', '').lower(),)
+    way['route_alt_name'] = (way.get('alt_name', '').lower(),)
+    way['route_off_name'] = (way.get('official_name', '').lower(),)
+    way['route_ref'] = (str(way.get('ref', '')).lower(),)
+
     wnodes = way.get('nodes', None)
     if nodes:
         first_node, last_node = wnodes[0], wnodes[-1]
