@@ -361,7 +361,7 @@ def process_route_links(
     rname = r['tags'].get('name', '').lower()
     raltname = r['tags'].get('alt_name', '').lower()
     roffname = r['tags'].get('official_name', '').lower()
-    rref = str(r['tags']['ref']).lower()
+    rref = str(r['tags'].get('ref', '')).lower()
     for m in r['members']:
         route_id = (rid, *parent_route_id)
         route_name = (rname, *parent_route_name)
@@ -386,7 +386,7 @@ def process_route_links(
             route_nodes.extend(way_nodes)
 
             wid = way['osmid']
-            wname = way['name'].lower()
+            wname = way.get('name', '').lower()
             waname = way.get('alt_name', '').lower()
             woname = way.get('official_name', '').lower()
             wref = str(way.get('ref', '')).lower()
