@@ -701,6 +701,8 @@ def _parse_nodes_paths(response_json):
         route.init_route_data(p, paths, nodes)
 
     for id, r in relations.items():
+        if 'tags' not in r:
+            continue
         if r["type"] == "relation" and r['tags'].get('route', None) == 'road':
             _process_route_relation(r, relations, paths, nodes=nodes)
 
