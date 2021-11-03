@@ -169,6 +169,7 @@ def get_full_route(G, node_id, route_id):
     return full_route
 
 
+"""
 def update_truncated_routes(G, nodes_to_be_removed, inplace=True):
     def update_start_end(route, rid, attr, update_value):
         route[rid][attr] = update_value
@@ -190,7 +191,52 @@ def update_truncated_routes(G, nodes_to_be_removed, inplace=True):
 
     # Updating graph with the altered nodes
     return utils_graph.graph_from_gdfs(*gdf)
+"""
 
+
+def update_truncated_routes(G, nodes_to_be_removed, inplace=True):
+    if not inplace:
+        G = G.copy()
+
+    for n in tqdm(nodes_to_be_removed, desc='Update truncated routes...'):
+        node = G.nodes[n]
+        for rid in node.get('route', {}):
+            # route = get_full_route(G, n, rid)
+            # Update prev/next
+            next_id = node['route'][rid]['next']
+            prev_id = node['route'][rid]['prev']
+            start_id = node['route'][rid]['start']
+            end_id = node['route'][rid]['end']
+
+            # Update start/end
+            if n == start_id:
+                visited = set()
+                # Node is a start node
+                nid = n
+                while True:
+                    visited.add(nid)
+                    G.nodes[nid]['route'][rid]['start'] = next_id
+                    nid = G.nodes[nid]['route'][rid]['next']
+                    if (nid is None) or (nid in visited):
+                        break
+            if n == end_id:
+                visited = set()
+                # Node is an end node
+                nid = n
+                while True:
+                    visited.add(nid)
+                    G.nodes[nid]['route'][rid]['end'] = prev_id
+                    nid = G.nodes[nid]['route'][rid]['prev']
+                    if (nid is None) or (nid in visited):
+                        break
+            if prev_id:
+                prev_node = G.nodes[prev_id]
+                prev_node['route'][rid]['next'] = next_id
+            if next_id:
+                next_node = G.nodes[next_id]
+                next_node['route'][rid]['prev'] = prev_id
+
+    return G
 
 def process_route_relation_id(r, relations, ways, parent_id=tuple(), parent_name=tuple()):
     first_node = last_node = None
