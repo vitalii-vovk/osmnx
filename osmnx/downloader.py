@@ -504,6 +504,7 @@ def _osm_network_download(polygon, network_type, custom_filter):
     # pass each polygon exterior coordinates in the list to the API, one at a
     # time. The '>' makes it recurse so we get ways and the ways' nodes.
     for polygon_coord_str in polygon_coord_strs:
+        # ORIGINAL QUERY: f"{overpass_settings};((way{osm_filter}(poly:'{polygon_coord_str}');rel(poly:'{polygon_coord_str}'););>;);out;"
         query_str = f"{overpass_settings};((way{osm_filter}(poly:'{polygon_coord_str}');rel(poly:'{polygon_coord_str}'););>;);out;"
         response_json = overpass_request(data={"data": query_str})
         response_jsons.append(response_json)
