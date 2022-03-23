@@ -37,50 +37,43 @@ def get_edge_dir(edge):
     return direction
 
 
-def add_route_dist(G, inplace=True):
-    def process_route(G, start_node_id, route_id):
-        node_id = start_node_id
-        route_dist = 0
-        node = G.nodes[node_id]
+def set_route_dist(G, route_id, start_id, start_dist=0):
+    """
+    Sets 'distance' attribute for every node along the route.
+    Args:
+        G (MultiDiGraph): road graph
+        route_id (Any): route id
+        start_id (Any): the first node id that is about to be processed
+        start_dist (float): route distance till the node with the start_id
+    """
+    prev_id = None
+    cur_id = start_id
+    route_dist = start_dist
+    node = G.nodes[cur_id]
+    node['route'][route_id]['distance'] = route_dist
+    next_id = node['route'][route_id]['neighbours'][prev_id]
+    while True:
+        # Reached the route's end
+        if next_id is None:
+            break
+
+        if G.has_edge(cur_id, next_id, 0):
+            edge = G.edges[(cur_id, next_id, 0)]
+            route_dist += edge['length']
+
+        node = G.nodes[next_id]
         node['route'][route_id]['distance'] = route_dist
-        visited = set()
-        while True:
-            visited.add(node_id)
-            next_node_id = node['route'][route_id]['next']
-            # Break if route is ended or self-loop
-            if next_node_id is None or next_node_id in visited:
-                break
-            if G.has_edge(node_id, next_node_id, 0):
-                edge = G.edges[(node_id, next_node_id, 0)]
-                route_dist += edge['length']
-            next_node = G.nodes[next_node_id]
-            next_node['route'][route_id]['distance'] = route_dist
-            node = next_node
-            node_id = next_node_id
-
-    if not inplace:
-        G = G.copy()
-
-    processed_routes = set()
-    for n in G.nodes:
-        node = G.nodes[n]
-        for rid in node.get('route', {}):
-            if rid in processed_routes:
-                continue
-            process_route(G, node['route'][rid]['start'], rid)
-            processed_routes.add(rid)
-
-    return G
+        prev_id, cur_id, next_id = cur_id, next_id, node['route'][route_id]['neighbours'][cur_id]
 
 
 def simplify_route(G, node_id, route_id, nodes_to_be_removed, inplace=True):
-    """Simplify route by updating start/end/next/prev attributes
+    """
+    Simplifies route by updating start/end/neighbours/distance attributes
     to nodes not in `nodes_to_be_removed`
-    CAUTION: route_distance attribute will not be changed!
 
     Args:
         G (osmnx.Graph): graph to be updated
-        node (Any): node id
+        node_id (Any): node id
         route_id (Any): route id
         nodes_to_be_removed (Container): list of all nodes that will be
             removed from the graph
@@ -150,25 +143,6 @@ def simplify_routes(G, nodes_to_be_removed, inplace=True):
     return G
 
 
-def get_full_route(G, node_id, route_id):
-    route = G.nodes[node_id]['route'][route_id]
-    start_id = route['start']
-
-    full_route = {}
-    node_id = start_id
-    visited = set()
-    while True:
-        visited.add(node_id)
-        route = G.nodes[node_id]['route'][route_id]
-        full_route[node_id] = route
-
-        node_id = route['next']
-        if node_id is None or node_id in visited:
-            break
-        route = G.nodes[node_id]['route'][route_id]
-    return full_route
-
-
 """
 def update_truncated_routes(G, nodes_to_be_removed, inplace=True):
     def update_start_end(route, rid, attr, update_value):
@@ -201,69 +175,58 @@ def update_truncated_routes(G, nodes_to_be_removed, inplace=True):
     for n in tqdm(nodes_to_be_removed, desc='Update truncated routes...'):
         node = G.nodes[n]
         for rid in node.get('route', {}):
-            # route = get_full_route(G, n, rid)
-            # Update prev/next
-            next_id = node['route'][rid]['next']
-            prev_id = node['route'][rid]['prev']
+            # Update prev/next nodes for the neighbours
+            for c_prev, c_next in node['route'][rid]['neighbours'].items():
+                if c_prev is not None:
+                    for p_prev, p_next in G.nodes[c_prev]['route'][rid]['neighbours'].items():
+                        if p_next == n:
+                            G.nodes[c_prev]['route'][rid]['neighbours'][p_prev] = c_next
+                            # We don't consider a case when there are multiple prev/next edges
+                            # for any specific edge
+                            break
+                if c_next is not None:
+                    for n_prev, n_next in G.nodes[c_next]['route'][rid]['neighbours'].items():
+                        if n_prev == n:
+                            del G.nodes[c_next]['route'][rid]['neighbours'][n_prev]
+                            G.nodes[c_next]['route'][rid]['neighbours'][c_prev] = n_next
+                            # We don't consider a case when there are multiple prev/next edges
+                            # for any specific edge
+                            break
+
             start_id = node['route'][rid]['start']
             end_id = node['route'][rid]['end']
 
             # Update start/end
+            # Node is a start node
             if n == start_id:
-                visited = set()
-                # Node is a start node
-                nid = n
+                # For the 2nd node in the route 'prev' in 'neighbours'
+                # is already set to its 'prev' value in 'neighbours' of the 1st node (to None)
+                prev_id = None
+                next_id = G.nodes[n]['route'][rid]['neighbours'][None]
+                start_id = next_id
                 while True:
-                    visited.add(nid)
-                    G.nodes[nid]['route'][rid]['start'] = next_id
-                    nid = G.nodes[nid]['route'][rid]['next']
-                    if (nid is None) or (nid in visited):
+                    G.nodes[next_id]['route'][rid]['start'] = start_id
+                    prev_id, next_id = next_id, G.nodes[next_id]['route'][rid]['neighbours'][prev_id]
+                    # Reached the route's end
+                    if next_id is None:
                         break
+
+            # Node is an end node
             if n == end_id:
-                visited = set()
-                # Node is an end node
-                nid = n
+                # For the pre-last node in the route 'next' in 'neighbours'
+                # is already set to its 'next' value in 'neighbours' of the last node (to None)
+                next_id = None
+                prev_id = [k for k, v in G.nodes[n]['route'][rid]['neighbours'].items() if v is None][0]
+                end_id = prev_id
                 while True:
-                    visited.add(nid)
-                    G.nodes[nid]['route'][rid]['end'] = prev_id
-                    nid = G.nodes[nid]['route'][rid]['prev']
-                    if (nid is None) or (nid in visited):
+                    G.nodes[prev_id]['route'][rid]['end'] = end_id
+                    next_id, prev_id = (prev_id,
+                                        [k for k, v in G.nodes[prev_id]['route'][rid]['neighbours'].items() if v == next_id][0])
+                    # Reached the route's start
+                    if prev_id is None:
                         break
-            if prev_id:
-                prev_node = G.nodes[prev_id]
-                prev_node['route'][rid]['next'] = next_id
-            if next_id:
-                next_node = G.nodes[next_id]
-                next_node['route'][rid]['prev'] = prev_id
 
     return G
-
-def process_route_relation_id(r, relations, ways, parent_id=tuple(), parent_name=tuple()):
-    first_node = last_node = None
-    if r is None:
-        return first_node, last_node
-
-    parent_id_ext = tuple([r['id'], *parent_id])
-    parent_name_ext = tuple([r.get('name', ''), *parent_name])
-
-    for m in r['members']:
-        if m['type'] == 'relation':
-            f_, l_ = process_route_relation_id(
-                relations.get(m['ref'], None), relations, ways, parent_id_ext, parent_name_ext)
-            if first_node is None:
-                first_node = f_
-            if l_:
-                last_node = l_
-        elif m['type'] == 'way':
-            way = ways.get(m['ref'], None)
-            if way:
-                # Extend the route_id
-                way['route_id'] = parent_id_ext
-                way['route_name'] = parent_name_ext
-                if first_node is None:
-                    first_node = way['nodes'][0]
-                last_node = way['nodes'][-1]
-    return first_node, last_node
 
 
 def process_route_relation_dir(r, relations, ways, nodes, parent_dir=None):
@@ -317,35 +280,26 @@ def process_route_relation_dir(r, relations, ways, nodes, parent_dir=None):
                             node['route'][r]['direction'] = pdir[r]
 
 
-def update_nodes_with_route_id(route_nodes, rid, nodes, skip_missing: bool = True):
+def update_nodes_with_route_id(G, route_nodes, rid, skip_missing: bool = True):
     if skip_missing:
-        route_nodes = [n for n in route_nodes if n in nodes]
+        route_nodes = [n for n in route_nodes if n in G.nodes()]
 
-    processed_nodes = set()
     start_id = route_nodes[0]
     end_id = route_nodes[-1]
     for i, n in enumerate(route_nodes):
-        if n in processed_nodes:
-            continue
-
         next_id = route_nodes[i + 1] if i < len(route_nodes) - 1 else None
         prev_id = None if i == 0 else route_nodes[i - 1]
 
-        node = nodes[n]
+        node = G.nodes[n]
         if 'route' not in node:
             node['route'] = {}
         if rid not in node['route']:
             node['route'][rid] = {}
         node['route'][rid]['start'] = start_id
         node['route'][rid]['end'] = end_id
-        node['route'][rid]['next'] = next_id
-        node['route'][rid]['prev'] = prev_id
-
-        # Self-loops
-        if next_id in processed_nodes:
-            next_node = nodes[next_id]
-            next_node['route'][rid]['prev'] = n
-        processed_nodes.add(n)
+        if 'neighbours' not in node['route'][rid]:
+            node['route'][rid]['neighbours'] = {}
+        node['route'][rid]['neighbours'][prev_id] = next_id
 
 
 def process_route_links(
@@ -353,6 +307,7 @@ def process_route_links(
     relations,
     ways,
     nodes,
+    rels,
     parent_route_id=tuple(),
     parent_route_name=tuple(),
     parent_route_alt_name=tuple(),
@@ -360,18 +315,19 @@ def process_route_links(
     parent_route_ref=tuple(),
     skip_missing: bool = True
 ):
-    """Updates route links withi the given relation `r`
-    and returs the list of ways in this relation
+    """Updates route links with the given relation `r`
+    and returns the list of ways in this relation
 
     Args:
         r (dict): the current relation item
         relations (dict): dictionary of all relations
         ways (dict): dictionary of all ways
+        rels (dict): <rel/path id> -> <rel/path nodes> mapping
         parent_route_id (tuple, optional): route id of the up-level route.
             Defaults to tuple()
-        parent_route_name (tuple, optional): route name of the up-level route.
-            Defaults to tuple()
-        drop_missing (bool, optional): if True, then skip nodes that are
+        parent_route_name, parent_route_alt_name, parent_route_off_name, parent_route_ref (tuple, optional):
+            route name of the up-level route. Defaults to tuple()
+        skip_missing (bool, optional): if True, then skip nodes that are
             missing in the `nodes`
 
     Returns:
@@ -397,7 +353,7 @@ def process_route_links(
             route_nodes.extend(
                 process_route_links(
                     relations.get(m['ref'], None),
-                    relations, ways, nodes,
+                    relations, ways, nodes, rels,
                     route_id,
                     route_name, route_aname, route_oname,
                     route_ref
@@ -428,8 +384,6 @@ def process_route_links(
             way['route_off_name'] = (*way_route_oname, *route_oname)
             way['route_ref'] = (*way_route_ref, *route_ref)
 
-            update_nodes_with_route_id(way_nodes, wid, nodes, skip_missing)
-
     # Remove duplicate nodes (at ways/relations joints)
     route_nodes = list(
         itertools.compress(
@@ -437,12 +391,13 @@ def process_route_links(
             [1] + list(map(lambda x: x[0] != x[1], zip(route_nodes[:-1], route_nodes[1:])))
         )
     )
-    update_nodes_with_route_id(route_nodes, rid, nodes)
+    # Will update rels with paths later during those paths processing
+    rels[rid] = route_nodes
 
     return route_nodes
 
 
-def init_route_data(p, paths, nodes, skip_missing: bool = True):
+def init_route_data(p, paths, all_graph_nodes, skip_missing: bool = True):
     way = paths[p]
     if 'route_id' in way:
         return
@@ -453,12 +408,11 @@ def init_route_data(p, paths, nodes, skip_missing: bool = True):
     way['route_off_name'] = (way.get('official_name', '').lower(),)
     way['route_ref'] = (str(way.get('ref', '')).lower(),)
 
-    wnodes = way.get('nodes', None)
-    if nodes:
-        first_node, last_node = wnodes[0], wnodes[-1]
+    way_nodes = way['nodes']
+    if all_graph_nodes:
+        first_node, last_node = way_nodes[0], way_nodes[-1]
         way['route'] = {
             wid: {
-                'direction': get_way_dir(first_node, last_node, nodes)
+                'direction': get_way_dir(first_node, last_node, all_graph_nodes)
             }
         }
-    update_nodes_with_route_id(way['nodes'], wid, nodes, skip_missing)

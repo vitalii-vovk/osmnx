@@ -240,10 +240,6 @@ def simplify_graph(G, strict=True, remove_rings=True):
     all_nodes_to_remove = []
     all_edges_to_add = []
 
-    # Map 
-    node_start_map = {}
-    node_end_map = {}
-
     # generate each path that needs to be simplified
     for path in _get_paths_to_simplify(G, strict=strict):
 
@@ -312,10 +308,6 @@ def simplify_graph(G, strict=True, remove_rings=True):
                 refs = [item for sublist in edge_attributes['route_ref'] for item in sublist]
                 edge_attributes["route_ref"] = [refs[i] for i in idx]
 
-        for p in path:
-            node_start_map[p] = path[0]
-            node_end_map[p] = path[-1]
-
         # add the nodes and edges to their lists for processing at the end
         all_nodes_to_remove.extend(path[1:-1])
         all_edges_to_add.append(
@@ -332,7 +324,7 @@ def simplify_graph(G, strict=True, remove_rings=True):
         # G.add_edge(edge["origin"], edge["destination"], **edge["attr_dict"])
 
     # Update routes
-    route.update_truncated_routes(G, set(all_nodes_to_remove))
+    #route.update_truncated_routes(G, set(all_nodes_to_remove))
     # finally remove all the interstitial nodes between the new edges
     G.remove_nodes_from(set(all_nodes_to_remove))
 
