@@ -285,10 +285,7 @@ def process_route_relation_dir(r, relations, ways, nodes, parent_dir=None):
                             node['route'][r]['direction'] = pdir[r]
 
 
-def update_nodes_with_route_id(G, route_nodes, rid, skip_missing: bool = True):
-    if skip_missing:
-        route_nodes = [n for n in route_nodes if n in G.nodes()]
-
+def update_nodes_with_route_id(G, route_nodes, rid):
     start_id = route_nodes[0]
     end_id = route_nodes[-1]
     for i, n in enumerate(route_nodes):

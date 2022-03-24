@@ -511,8 +511,6 @@ def graph_from_polygon(
         spn = utils_graph.count_streets_per_node(G)
         nx.set_node_attributes(G, values=spn, name="street_count")
 
-    all_rels = set(rels.keys())
-
     # Filtering rels after graph truncation
     keys_to_remove = []
     for k,v in rels.items():
@@ -523,7 +521,6 @@ def graph_from_polygon(
             keys_to_remove.append(k)
     [rels.pop(k) for k in keys_to_remove]
 
-    print(f'ROUTE NODES: {all_rels - set(rels.keys())}')
     # Adding additional attributes to the nodes
     for rid, route_nodes in rels.items():
         # Adding route attributes
