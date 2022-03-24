@@ -145,6 +145,9 @@ def simplify_routes(G, nodes_to_be_removed, inplace=True):
 
 """
 def update_truncated_routes(G, nodes_to_be_removed, inplace=True):
+    '''
+    Method based on GDF
+    '''
     def update_start_end(route, rid, attr, update_value):
         route[rid][attr] = update_value
 
@@ -165,10 +168,12 @@ def update_truncated_routes(G, nodes_to_be_removed, inplace=True):
 
     # Updating graph with the altered nodes
     return utils_graph.graph_from_gdfs(*gdf)
-"""
 
 
 def update_truncated_routes(G, nodes_to_be_removed, inplace=True):
+    '''
+    Method based on loops
+    '''
     if not inplace:
         G = G.copy()
 
@@ -227,7 +232,7 @@ def update_truncated_routes(G, nodes_to_be_removed, inplace=True):
                         break
 
     return G
-
+"""
 
 def process_route_relation_dir(r, relations, ways, nodes, parent_dir=None):
     if r is None:

@@ -517,7 +517,8 @@ def graph_from_polygon(
         route.update_nodes_with_route_id(G, route_nodes, rid)
 
         # Adding distances
-        route.set_route_dist(G, rid, route_nodes[0])
+        start_id = [n for n in route_nodes if n in G.nodes()][0]
+        route.set_route_dist(G, rid, start_id)
 
     utils.log(f"graph_from_polygon returned graph with {len(G)} nodes and {len(G.edges)} edges")
     return G
