@@ -514,12 +514,14 @@ def graph_from_polygon(
     all_rels = set(rels.keys())
 
     # Filtering rels after graph truncation
+    keys_to_remove = []
     for k,v in rels.items():
         nodes = [n for n in v if n in G.nodes()]
         if nodes:
             rels[k] = nodes
         else:
-            del rels[k]
+            keys_to_remove.append(k)
+    [rels.pop(k) for k in keys_to_remove]
 
     print(f'ROUTE NODES: {all_rels - set(rels.keys())}')
     # Adding additional attributes to the nodes
