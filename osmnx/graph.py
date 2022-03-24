@@ -511,19 +511,24 @@ def graph_from_polygon(
         spn = utils_graph.count_streets_per_node(G)
         nx.set_node_attributes(G, values=spn, name="street_count")
 
+    all_rels = set(rels.keys())
+
+    # Filtering rels after graph truncation
+    for k,v in rels.items():
+        nodes = [n for n in v if n in G.nodes()]
+        if nodes:
+            rels[k] = nodes
+        else:
+            del rels[k]
+
+    print(f'ROUTE NODES: {all_rels - set(rels.keys())}')
     # Adding additional attributes to the nodes
-    filtered_rels = {k:v for k,v in rels.items() if v}
-    print(f'ROUTE NODES: {filtered_rels}')
     for rid, route_nodes in rels.items():
-        if not route_nodes:
-            print(f'{rid} route has no nodes left after truncation')
-            continue
         # Adding route attributes
         route.update_nodes_with_route_id(G, route_nodes, rid)
 
         # Adding distances
-        start_id = [n for n in route_nodes if n in G.nodes()][0]
-        route.set_route_dist(G, rid, start_id)
+        route.set_route_dist(G, rid, route_nodes[0])
 
     utils.log(f"graph_from_polygon returned graph with {len(G)} nodes and {len(G.edges)} edges")
     return G
