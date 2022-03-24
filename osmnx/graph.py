@@ -512,7 +512,12 @@ def graph_from_polygon(
         nx.set_node_attributes(G, values=spn, name="street_count")
 
     # Adding additional attributes to the nodes
+    filtered_rels = {k:v for k,v in rels.items() if v}
+    print(f'ROUTE NODES: {filtered_rels}')
     for rid, route_nodes in rels.items():
+        if not route_nodes:
+            print(f'{rid} route has no nodes left after truncation')
+            continue
         # Adding route attributes
         route.update_nodes_with_route_id(G, route_nodes, rid)
 
