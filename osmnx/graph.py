@@ -515,7 +515,7 @@ def graph_from_polygon(
     keys_to_remove = []
     for k,v in rels.items():
         nodes = [n for n in v if n in G.nodes()]
-        if nodes:
+        if len(nodes) > 1:
             rels[k] = nodes
         else:
             keys_to_remove.append(k)
