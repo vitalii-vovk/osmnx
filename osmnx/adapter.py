@@ -48,7 +48,7 @@ class OSMGraph(nx.MultiDiGraph):
             node_id {str} -- id of the node
         """
         super(OSMGraph, self).add_node(node_id, **kwargs)
-        node = self.graph.nodes[node_id]
+        node = self.nodes[node_id]
 
         # Setting the geo_origin if it's not set
         if self.geo_origin == (0, 0) and ('x' in node and 'y' in node):
@@ -69,9 +69,9 @@ class OSMGraph(nx.MultiDiGraph):
 
         super(OSMGraph, self).add_edge(*edge_id[:2], **kwargs)
 
-        node1 = self.graph.nodes[edge_id[0]]
-        node2 = self.graph.nodes[edge_id[1]]
-        edge = self.graph.edges[edge_id]
+        node1 = self.nodes[edge_id[0]]
+        node2 = self.nodes[edge_id[1]]
+        edge = self.edges[edge_id]
 
         # Projecting edge's geometry if needed
         if self.geo_convert and 'geometry' in edge:
