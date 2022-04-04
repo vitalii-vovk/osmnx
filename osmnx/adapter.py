@@ -205,7 +205,7 @@ class OSMGraph(nx.MultiDiGraph):
                 x, y, _ = pm.geodetic2enu(*pt, 0, *self.geo_origin, 0)
                 pt = np.array([x, y], dtype=np.float32)
             else:
-                pt = np.array([*pt], dtype=np.float32)
+                pt = np.array(list(reversed(pt)), dtype=np.float32)
 
             projected_pts, edge_idxs, distances = self._project_point(pt, n)
 
