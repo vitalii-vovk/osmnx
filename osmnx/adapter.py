@@ -146,7 +146,7 @@ class OSMGraph(nx.MultiDiGraph):
         """
 
         # finds which bbox id corresponds to the given point
-        rect_mask = in_rect(self.bboxes[:, 0], self.bboxes[:, 1], np.array([pt]))
+        rect_mask = in_rect(self.bboxes[:, 0], self.bboxes[:, 1], pt)
         # if pt in at list one bbox we continue projection
         if np.any(rect_mask):
 
@@ -204,6 +204,8 @@ class OSMGraph(nx.MultiDiGraph):
             if geo:
                 x, y, _ = pm.geodetic2enu(*pt, 0, *self.geo_origin, 0)
                 pt = np.array([x, y], dtype=np.float32)
+            else:
+                pt = np.array([*pt], dtype=np.float32)
 
             projected_pts, edge_idxs, distances = self._project_point(pt, n)
 
