@@ -24,6 +24,7 @@ class OSMGraph(nx.MultiDiGraph):
         nx.MultiDiGraph.__init__(self)
         self.graph['crs'] = 'epsg:2223'     # Default EPSG code as the graph will not use it anyhow
         self.geo_origin = ref_lat, ref_lon
+        self.geo_convert = geo_convert
 
         # Adding nodes from the source graph
         for n_id in G.nodes():
@@ -34,7 +35,6 @@ class OSMGraph(nx.MultiDiGraph):
         for e_id in G.edges(keys=True):
             self.add_edge(e_id, **G.edges[e_id])
 
-        self.geo_convert = geo_convert
         self.nodesIDs = list(G.nodes())
         self.neighbors = dict(zip(self.nodesIDs, [list(G.successors(nodeID)) for nodeID in self.nodesIDs]))
 
