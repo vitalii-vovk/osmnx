@@ -146,7 +146,7 @@ class OSMGraph(nx.MultiDiGraph):
         """
 
         # finds which bbox id corresponds to the given point
-        rect_mask = in_rect(self.bboxes[:, 0], self.bboxes[:, 1], pt)
+        rect_mask = in_rect(self.bboxes[:, 0], self.bboxes[:, 1], np.array([pt]))
         # if pt in at list one bbox we continue projection
         if np.any(rect_mask):
 
