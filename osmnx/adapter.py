@@ -42,7 +42,7 @@ class OSMGraph(nx.MultiDiGraph):
 
         # Checking if our object contains any edges and needs to be split to areas
         if len(self.edges()) > 0:
-            self.divide_area(n_div, patch_padding)
+            self.divide_area()
 
     def add_node(self, node_id, **kwargs):
         """
@@ -219,7 +219,7 @@ class OSMGraph(nx.MultiDiGraph):
 
         return projected_pts_list, edge_idxs_list, distances_list
 
-    def _divide_area(self):
+    def divide_area(self):
 
         """
         Divides drivable area to patches (sub-graphs). Each patch matches graph points within it.
