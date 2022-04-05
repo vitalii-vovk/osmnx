@@ -23,6 +23,8 @@ class OSMGraph(nx.MultiDiGraph):
 
         nx.MultiDiGraph.__init__(self)
         self.graph['crs'] = 'epsg:2223'     # Default EPSG code as the graph will not use it anyhow
+        self._ndiv = n_div
+        self._patch_padding = patch_padding
         self.geo_origin = ref_lat, ref_lon
         self.geo_convert = geo_convert
 
@@ -38,7 +40,9 @@ class OSMGraph(nx.MultiDiGraph):
         self.nodesIDs = list(G.nodes())
         self.neighbors = dict(zip(self.nodesIDs, [list(G.successors(nodeID)) for nodeID in self.nodesIDs]))
 
-        self._divide_area(n_div, patch_padding)
+        # Checking if our object contains any edges and needs to be split to areas
+        if len(self.edges()) > 0:
+            self.divide_area(n_div, patch_padding)
 
     def add_node(self, node_id, **kwargs):
         """
@@ -215,16 +219,11 @@ class OSMGraph(nx.MultiDiGraph):
 
         return projected_pts_list, edge_idxs_list, distances_list
 
-    def _divide_area(self, n_div, patch_padding):
+    def _divide_area(self):
 
         """
-        Divides drivable area to patches (sub-graphs). Each patch matches grpah points within it.
-        Used to speed-up matching on grpah.
-
-
-        Arguments:
-            n_div {int} -- number of divisions to patches
-            patch_padding {float} -- padding value to cover patches with extra area
+        Divides drivable area to patches (sub-graphs). Each patch matches graph points within it.
+        Used to speed-up matching on graph.
         """
 
         lane_pts0, lane_pts1, edge_map_idxs, edge_pt_idxs = self._get_projections_params()
@@ -242,7 +241,7 @@ class OSMGraph(nx.MultiDiGraph):
         self.outer_bbox = bboxes.copy()
 
         # divides graph into patches by two along each coordinate alternatively
-        for i in range(n_div):
+        for i in range(self._n_div):
 
             new_bboxes = []
             for bbox in bboxes:
@@ -256,8 +255,8 @@ class OSMGraph(nx.MultiDiGraph):
 
             # adds padding to patches
             # finds graph point mask for particular patch
-            mask0 = in_rect(bboxes[[i], 0] - patch_padding, bboxes[[i], 1] + patch_padding, lane_pts0)
-            mask1 = in_rect(bboxes[[i], 0] - patch_padding, bboxes[[i], 1] + patch_padding, lane_pts1)
+            mask0 = in_rect(bboxes[[i], 0] - self._patch_padding, bboxes[[i], 1] + self._patch_padding, lane_pts0)
+            mask1 = in_rect(bboxes[[i], 0] - self._patch_padding, bboxes[[i], 1] + self._patch_padding, lane_pts1)
 
             mask = mask0 | mask1
 
