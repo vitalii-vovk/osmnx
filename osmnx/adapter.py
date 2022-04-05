@@ -35,7 +35,7 @@ class OSMGraph(nx.MultiDiGraph):
         # Adding edges from the source graph
         # Need to use keys=True because __get_item__ used for e_id unpacking gives an error otherwise
         for e_id in G.edges(keys=True):
-            self.add_edge(e_id, **G.edges[e_id])
+            self.add_edge(*e_id, **G.edges[e_id])
 
         self.nodesIDs = list(G.nodes())
         self.neighbors = dict(zip(self.nodesIDs, [list(G.successors(nodeID)) for nodeID in self.nodesIDs]))
