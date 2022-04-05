@@ -62,20 +62,23 @@ class OSMGraph(nx.MultiDiGraph):
         if self.geo_convert:
             node['x'], node['y'], _ = pm.geodetic2enu(node['y'], node['x'], 0, *self.geo_origin, 0)
 
-    def add_edge(self, edge_id, **kwargs):
+    def add_edge(self, u, v, k=None, **kwargs):
         """
         Adds an edge to the graph. Projects its geometry if needed.
         Adds the additional attributes.
 
         Arguments:
-            edge_id {str} -- id of the edge
+            u, v, k {str} -- id of the edge
         """
 
-        super(OSMGraph, self).add_edge(*edge_id[:2], **kwargs)
+        if k is None:
+            k = (max(np.array(self.edges(keys=True))[:, 2]) + 1) if (u, v) in self.edges() else 0
 
-        node1 = self.nodes[edge_id[0]]
-        node2 = self.nodes[edge_id[1]]
-        edge = self.edges[edge_id]
+        super(OSMGraph, self).add_edge(u, v, k, **kwargs)
+
+        node1 = self.nodes[u]
+        node2 = self.nodes[v]
+        edge = self.edges[(u, v, k)]
 
         # Projecting edge's geometry if needed
         if self.geo_convert and 'geometry' in edge:
@@ -85,8 +88,8 @@ class OSMGraph(nx.MultiDiGraph):
             edge['geometry'] = LineString(geo)
 
         coords = np.array([[node1['x'], node1['y']], [node2['x'], node2['y']]], dtype=np.float32)
-        self.edges[edge_id]['length'] = self._get_length(coords)
-        self.edges[edge_id]['coords'] = coords
+        self.edges[(u, v, k)]['length'] = self._get_length(coords)
+        self.edges[(u, v, k)]['coords'] = coords
 
     @staticmethod
     def _get_length(arr):
