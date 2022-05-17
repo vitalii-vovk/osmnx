@@ -22,7 +22,8 @@ class OSMGraph(nx.MultiDiGraph):
         """
 
         nx.MultiDiGraph.__init__(self)
-        self.graph['crs'] = 'epsg:2223'     # Default EPSG code as the graph will not use it anyhow
+        # self.graph['crs'] = 'epsg:2223'     # Default EPSG code as the graph will not use it anyhow
+        self.graph['crs'] = 'epsg:4326'     # WGS84
         self._n_div = n_div
         self._patch_padding = patch_padding
         self.geo_origin = ref_lat, ref_lon
