@@ -355,8 +355,8 @@ def graph_from_place(
     return G
 
 
-def _process_route_relation(r, relations, ways, nodes):
-    route_nodes = route.process_route_links(r, relations, ways, nodes)
+def _process_route_relation(r, relations, ways, rels, nodes):
+    route_nodes = route.process_route_links(r, relations, ways, nodes, rels)
     first_node = route_nodes[0]
     last_node = route_nodes[-1]
 
@@ -456,7 +456,7 @@ def graph_from_polygon(
 
         # create buffered graph from the downloaded data
         bidirectional = network_type in settings.bidirectional_network_types
-        G_buff = _create_graph(response_jsons, retain_all=True, bidirectional=bidirectional)
+        G_buff, rels = _create_graph(response_jsons, retain_all=True, bidirectional=bidirectional)
 
         # truncate buffered graph to the buffered polygon and retain_all for
         # now. needed because overpass returns entire ways that also include
@@ -491,7 +491,7 @@ def graph_from_polygon(
 
         # create graph from the downloaded data
         bidirectional = network_type in settings.bidirectional_network_types
-        G = _create_graph(response_jsons, retain_all=True, bidirectional=bidirectional)
+        G, rels = _create_graph(response_jsons, retain_all=True, bidirectional=bidirectional)
 
         # truncate the graph to the extent of the polygon
         G = truncate.truncate_graph_polygon(G, polygon, retain_all, truncate_by_edge)
@@ -504,6 +504,30 @@ def graph_from_polygon(
 
         # Update edges' direction
         G = update_edges_direction(G)
+
+        # count how many physical streets connect to each intersection/deadend
+        # note this will be somewhat inaccurate due to periphery effects, so
+        # it's best to parameterize function with clean_periphery=True
+        spn = utils_graph.count_streets_per_node(G)
+        nx.set_node_attributes(G, values=spn, name="street_count")
+
+    # Filtering rels after graph truncation
+    keys_to_remove = []
+    for k,v in rels.items():
+        nodes = [n for n in v if n in G.nodes()]
+        if len(nodes) > 1:
+            rels[k] = nodes
+        else:
+            keys_to_remove.append(k)
+    [rels.pop(k) for k in keys_to_remove]
+
+    # Adding additional attributes to the nodes
+    for rid, route_nodes in rels.items():
+        # Adding route attributes
+        route.update_nodes_with_route_id(G, route_nodes, rid)
+
+        # Adding distances
+        route.set_route_dist(G, rid, route_nodes[0])
 
     utils.log(f"graph_from_polygon returned graph with {len(G)} nodes and {len(G.edges)} edges")
     return G
@@ -533,7 +557,7 @@ def graph_from_xml(filepath, bidirectional=False, simplify=True, retain_all=Fals
     response_jsons = [osm_xml._overpass_json_from_file(filepath)]
 
     # create graph using this response JSON
-    G = _create_graph(response_jsons, bidirectional=bidirectional, retain_all=retain_all)
+    G, _ = _create_graph(response_jsons, bidirectional=bidirectional, retain_all=retain_all)
 
     # simplify the graph topology as the last step
     if simplify:
@@ -567,6 +591,7 @@ def _create_graph(response_jsons, retain_all=False, bidirectional=False):
     Returns
     -------
     G : networkx.MultiDiGraph
+    rels: dict with <rel/path id> -> <rel/path nodes> mapping
     """
     utils.log("Creating graph from downloaded OSM data...")
 
@@ -585,10 +610,12 @@ def _create_graph(response_jsons, retain_all=False, bidirectional=False):
     # extract nodes and paths from the downloaded osm data
     nodes = dict()
     paths = dict()
+    rels = dict()
     for response_json in response_jsons:
-        nodes_temp, paths_temp = _parse_nodes_paths(response_json)
+        nodes_temp, paths_temp, rels_temp = _parse_nodes_paths(response_json)
         nodes.update(nodes_temp)
         paths.update(paths_temp)
+        rels.update(rels_temp)
 
     # add each osm node to the graph
     for node, data in nodes.items():
@@ -600,7 +627,6 @@ def _create_graph(response_jsons, retain_all=False, bidirectional=False):
     # add length (great-circle distance between nodes) attribute to each edge
     if len(G.edges) > 0:
         G = distance.add_edge_lengths(G)
-        G = route.add_route_dist(G)
 
     # retain only the largest connected component if retain_all is False
     if not retain_all:
@@ -608,7 +634,7 @@ def _create_graph(response_jsons, retain_all=False, bidirectional=False):
 
     utils.log(f"Created graph with {len(G)} nodes and {len(G.edges)} edges")
 
-    return G
+    return G, rels
 
 
 def _convert_node(element):
@@ -682,12 +708,13 @@ def _parse_nodes_paths(response_json):
 
     Returns
     -------
-    nodes, paths : tuple of dicts
+    nodes, paths, rels : tuple of dicts
         dicts' keys = osmid and values = dict of attributes
     """
     nodes = dict()
     paths = dict()
     relations = dict()
+    rels = dict()
     for element in response_json["elements"]:
         if element["type"] == "node":
             nodes[element["id"]] = _convert_node(element)
@@ -696,17 +723,22 @@ def _parse_nodes_paths(response_json):
         elif element["type"] == "relation":
             relations[element["id"]] = _convert_relation(element)
 
-    for p in paths:
-        _init_path_geometry(p, paths, nodes)
-        route.init_route_data(p, paths, nodes)
-
-    for id, r in relations.items():
+    # Processing relations
+    for _, r in relations.items():
         if 'tags' not in r:
             continue
-        if r["type"] == "relation" and r['tags'].get('route', None) == 'road':
-            _process_route_relation(r, relations, paths, nodes=nodes)
+        if r['tags'].get('route', None) == 'road':
+            # Processing routes, their paths and nodes (populating additional attributes)
+            _process_route_relation(r, relations, paths, rels, nodes=nodes)
 
-    return nodes, paths
+    # Processing the reset of paths and their nodes
+    # if they were missing in relations
+    for p in paths:
+        #_init_path_geometry(p, paths, nodes)
+        route.init_route_data(p, paths, nodes)
+        rels[p] = paths[p]['nodes']
+
+    return nodes, paths, rels
 
 
 def _is_path_one_way(path, bidirectional, oneway_values):
