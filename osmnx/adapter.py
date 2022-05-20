@@ -153,7 +153,7 @@ class OSMGraph(nx.MultiDiGraph):
             distances {np.array} -- distances to projection
         """
 
-        if self.bboxes and self.proj_params:
+        if self.bboxes is not None and self.proj_params is not None:
             # finds which bbox id corresponds to the given point
             rect_mask = in_rect(self.bboxes[:, 0], self.bboxes[:, 1], pt)
             # if pt in at list one bbox we continue projection
