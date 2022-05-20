@@ -27,6 +27,8 @@ class OSMGraph(nx.MultiDiGraph):
         self._patch_padding = patch_padding
         self.geo_origin = ref_lat, ref_lon
         self.geo_convert = geo_convert
+        self.proj_params = None
+        self.bboxes = None
 
         # Adding nodes from the source graph
         for n_id in G.nodes():
@@ -40,9 +42,8 @@ class OSMGraph(nx.MultiDiGraph):
         self.nodesIDs = list(G.nodes())
         self.neighbors = dict(zip(self.nodesIDs, [list(G.successors(nodeID)) for nodeID in self.nodesIDs]))
 
-        # Checking if our object contains any edges and needs to be split to areas
-        if len(self.edges()) > 0:
-            self.divide_area()
+        # Splitting the graph to areas
+        self.divide_area()
 
     def add_node(self, node_id, **kwargs):
         """
@@ -152,37 +153,36 @@ class OSMGraph(nx.MultiDiGraph):
             distances {np.array} -- distances to projection
         """
 
-        # finds which bbox id corresponds to the given point
-        rect_mask = in_rect(self.bboxes[:, 0], self.bboxes[:, 1], pt)
-        # if pt in at list one bbox we continue projection
-        if np.any(rect_mask):
+        if self.bboxes and self.proj_params:
+            # finds which bbox id corresponds to the given point
+            rect_mask = in_rect(self.bboxes[:, 0], self.bboxes[:, 1], pt)
+            # if pt in at list one bbox we continue projection
+            if np.any(rect_mask):
 
-            bbox_key = np.argmax(rect_mask)
+                bbox_key = np.argmax(rect_mask)
 
-            # finds projections and distances to all edges
-            projected_pts, distances = project_numba(self.proj_params[bbox_key]['lane_pts0'],
-                                                     self.proj_params[bbox_key]['lane_pts1'],
-                                                     pt)
+                # finds projections and distances to all edges
+                projected_pts, distances = project_numba(self.proj_params[bbox_key]['lane_pts0'],
+                                                         self.proj_params[bbox_key]['lane_pts1'],
+                                                         pt)
 
-            # finds 'n' nearest projections
-            try:
-                min_n_idxs = np.argpartition(distances, n)[:n]
+                # finds 'n' nearest projections
+                try:
+                    min_n_idxs = np.argpartition(distances, n)[:n]
 
-            except ValueError:
-                n = len(distances) - 1
-                min_n_idxs = np.argpartition(distances, n)[:n]
-                warnings.warn("number of n nearest projections exceeded number of edges")
+                except ValueError:
+                    n = len(distances) - 1
+                    min_n_idxs = np.argpartition(distances, n)[:n]
+                    warnings.warn("number of n nearest projections exceeded number of edges")
 
-            edge_idxs = [self.proj_params[bbox_key]['edge_map_idxs'][idx] for idx in min_n_idxs]
-            projected_pts = projected_pts[min_n_idxs]
-            distances = distances[min_n_idxs]
-        # if pt out of all bbox returns None
-        else:
-            projected_pts = None
-            edge_idxs = None
-            distances = None
+                edge_idxs = [self.proj_params[bbox_key]['edge_map_idxs'][idx] for idx in min_n_idxs]
+                projected_pts = projected_pts[min_n_idxs]
+                distances = distances[min_n_idxs]
 
-        return projected_pts, edge_idxs, distances
+                return projected_pts, edge_idxs, distances
+
+        # if pt out of all bbox or self.bboxes and self.proj_params are not defined returns None
+        return None, None, None
 
     def project_points(self, pts, n, geo=False):
 
@@ -229,57 +229,53 @@ class OSMGraph(nx.MultiDiGraph):
         Used to speed-up matching on graph.
         """
 
-        lane_pts0, lane_pts1, edge_map_idxs, edge_pt_idxs = self._get_projections_params()
+        if len(self.edges()) > 0:
+            lane_pts0, lane_pts1, edge_map_idxs, edge_pt_idxs = self._get_projections_params()
 
-        # bounds of patch
-        min_pt = np.min([lane_pts0.min(axis=0), lane_pts1.min(axis=0)], axis=0)  # - 10
-        max_pt = np.max([lane_pts0.max(axis=0), lane_pts1.max(axis=0)], axis=0)  # + 10
+            # bounds of patch
+            min_pt = np.min([lane_pts0.min(axis=0), lane_pts1.min(axis=0)], axis=0)  # - 10
+            max_pt = np.max([lane_pts0.max(axis=0), lane_pts1.max(axis=0)], axis=0)  # + 10
 
-        self.min_pt = min_pt
-        self.max_pt = max_pt
+            proj_params = {}
+            bboxes = np.array([[min_pt, max_pt]])
 
-        proj_params = {}
+            # divides graph into patches by two along each coordinate alternatively
+            for i in range(self._n_div):
 
-        bboxes = np.array([[min_pt, max_pt]])
-        self.outer_bbox = bboxes.copy()
+                new_bboxes = []
+                for bbox in bboxes:
+                    new_bboxes.append(divide_bbox(bbox[0], bbox[1], coord=i % 2))
 
-        # divides graph into patches by two along each coordinate alternatively
-        for i in range(self._n_div):
+                bboxes = np.vstack(new_bboxes)
 
-            new_bboxes = []
-            for bbox in bboxes:
-                new_bboxes.append(divide_bbox(bbox[0], bbox[1], coord=i % 2))
+            bbox_mask = []
+            cnt = 0
+            for i in range(len(bboxes)):
 
-            bboxes = np.vstack(new_bboxes)
+                # adds padding to patches
+                # finds graph point mask for particular patch
+                mask0 = in_rect(bboxes[[i], 0] - self._patch_padding, bboxes[[i], 1] + self._patch_padding, lane_pts0)
+                mask1 = in_rect(bboxes[[i], 0] - self._patch_padding, bboxes[[i], 1] + self._patch_padding, lane_pts1)
 
-        bbox_mask = []
-        cnt = 0
-        for i in range(len(bboxes)):
+                mask = mask0 | mask1
 
-            # adds padding to patches
-            # finds graph point mask for particular patch
-            mask0 = in_rect(bboxes[[i], 0] - self._patch_padding, bboxes[[i], 1] + self._patch_padding, lane_pts0)
-            mask1 = in_rect(bboxes[[i], 0] - self._patch_padding, bboxes[[i], 1] + self._patch_padding, lane_pts1)
+                if len(edge_pt_idxs[mask]) > 0:
 
-            mask = mask0 | mask1
+                    proj_params[cnt] = {
+                        'lane_pts0': lane_pts0[mask],
+                        'lane_pts1': lane_pts1[mask],
+                        'edge_map_idxs': [k for k, j in zip(edge_map_idxs, mask) if j],
+                        'edge_pt_idxs': edge_pt_idxs[mask]
+                    }
 
-            if len(edge_pt_idxs[mask]) > 0:
+                    bbox_mask.append(True)
+                    cnt += 1
 
-                proj_params[cnt] = {
-                    'lane_pts0': lane_pts0[mask],
-                    'lane_pts1': lane_pts1[mask],
-                    'edge_map_idxs': [k for k, j in zip(edge_map_idxs, mask) if j],
-                    'edge_pt_idxs': edge_pt_idxs[mask]
-                }
+                else:
+                    bbox_mask.append(False)
 
-                bbox_mask.append(True)
-                cnt += 1
-
-            else:
-                bbox_mask.append(False)
-
-        self.proj_params = proj_params
-        self.bboxes = bboxes[bbox_mask]
+            self.proj_params = proj_params
+            self.bboxes = bboxes[bbox_mask]
 
 
 @nb.njit((nb.types.Array(nb.types.float32, 2, 'C'),
