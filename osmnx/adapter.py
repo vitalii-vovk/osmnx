@@ -273,7 +273,7 @@ class OSMGraph(nx.MultiDiGraph):
             key += 1
         return str(key)
 
-    def _update_graph_from_map(self, lane_groups):
+    def update_graph_from_map(self, lane_groups):
         for group in lane_groups.values():
             gid = group['gid']
             # First, remove the existing edges with the same
