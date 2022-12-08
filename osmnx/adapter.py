@@ -60,8 +60,11 @@ class GraphDict:
             self._subs[gid] = G
 
     def __getitem__(self, k):
-        G = self._get_subgraph(self._gids[0])
-        return getattr(G, self._type)[self._id][k]
+        if self._gids:
+            G = self._get_subgraph(self._gids[0])
+            return getattr(G, self._type)[self._id][k]
+        else:
+            raise KeyError(k)
 
     def __delitem__(self, key):
         for gid in self._gids:
@@ -70,24 +73,39 @@ class GraphDict:
             self._subs[gid] = G
 
     def __contains__(self, k):
-        G = self._get_subgraph(self._gids[0])
-        return k in getattr(G, self._type)[self._id]
+        if self._gids:
+            G = self._get_subgraph(self._gids[0])
+            return k in getattr(G, self._type)[self._id]
+        else:
+            return False
 
     def __iter__(self):
-        G = self._get_subgraph(self._gids[0])
-        return iter(getattr(G, self._type)[self._id])
+        if self._gids:
+            G = self._get_subgraph(self._gids[0])
+            return iter(getattr(G, self._type)[self._id])
+        else:
+            return iter([])
 
     def __len__(self):
-        G = self._get_subgraph(self._gids[0])
-        return len(getattr(G, self._type)[self._id])
+        if self._gids:
+            G = self._get_subgraph(self._gids[0])
+            return len(getattr(G, self._type)[self._id])
+        else:
+            return 0
 
     def __str__(self):
-        G = self._get_subgraph(self._gids[0])
-        return str(getattr(G, self._type)[self._id])
+        if self._gids:
+            G = self._get_subgraph(self._gids[0])
+            return str(getattr(G, self._type)[self._id])
+        else:
+            return str(dict())
 
     def __repr__(self):
-        G = self._get_subgraph(self._gids[0])
-        return repr(getattr(G, self._type)[self._id])
+        if self._gids:
+            G = self._get_subgraph(self._gids[0])
+            return repr(getattr(G, self._type)[self._id])
+        else:
+            return repr(dict())
 
     def _get_subgraph(self, gid):
         if gid not in self._subs:
@@ -119,11 +137,10 @@ class GraphDict:
         new_subgraph_ids = []
         if 'geometry' in dct:
             new_subgraph_ids = get_subgraph_ids(dct['geometry'].coords)
+        elif '_geometry' in dct:
+            new_subgraph_ids = get_subgraph_ids(dct['_geometry'].coords)
         elif 'x' in dct and 'y' in dct:
             new_subgraph_ids = get_subgraph_ids([(dct['x'], dct['y'])])
-        elif '_geometry' in dct:
-            new_subgraph_ids = get_subgraph_ids(dct.pop('_geometry'))
-        print(f'New subgraph ids: {new_subgraph_ids}')
 
         # Obtaining actual item attributes dict (old and those that are in kwargs)
         if self._gids:
@@ -132,38 +149,30 @@ class GraphDict:
             item_data.update(dct)
         else:
             item_data = dct
-        print(f'{self._id} attrs: {item_data}')
 
         if new_subgraph_ids:
             # Sub graphs that no longer contain this item
             orphaned_ids = set(self._gids).difference(set(new_subgraph_ids))
-            print(f'Orphaned ids: {orphaned_ids}')
 
             for gid in orphaned_ids:
                 G = self._get_subgraph(gid)
                 if self._is_node() and G.has_node(self._id):
-                    print(f'Removing {self._id} node from {gid}')
                     getattr(G, 'remove_node')(self._id)
                 elif not self._is_node() and G.has_edge(*self._id[:2]):
-                    print(f'Removing {self._id} edge from {gid}')
                     getattr(G, 'remove_edge')(*self._id)
                 self._subs[gid] = G
 
             # Update the sub graph ids list
             self._gids[:] = new_subgraph_ids
-            print(f'New self._gids: {self._gids}')
 
         # Create/update the item attributes in the sub graphs
         for gid in self._gids:
             G = self._get_subgraph(gid)
             if self._is_node():
-                print(f'Adding/updating {self._id} node to {gid}')
                 getattr(G, 'add_node')(self._id, **item_data)
             else:
-                print(f'Adding/updating {self._id} edge to {gid}')
                 getattr(G, 'add_edge')(*self._id, **item_data)
             self._subs[gid] = G
-            print(f'Subgraph {gid} data: {G._node}, {G._adj}')
 
     def pop(self, k):
         for gid in self._gids:
@@ -180,19 +189,6 @@ class GraphDict:
 
 
 class OSMGraph(nx.MultiDiGraph):
-
-    mgr = Manager()
-    node_attr_dict_factory = GraphDict
-    edge_attr_dict_factory = GraphDict
-    node_dict_factory = mgr.dict
-    edge_key_dict_factory = mgr.dict
-    adjlist_outer_dict_factory = mgr.dict
-    adjlist_inner_dict_factory = mgr.dict
-    # Graph attributes are stored within the object
-    graph_attr_dict_factory = mgr.dict
-
-    geo_origin = (0, 0)
-
     def __init__(self, G, geo_convert=False):
 
         """
@@ -204,6 +200,17 @@ class OSMGraph(nx.MultiDiGraph):
             geo_convert {bool} -- if to convert graph edges coordinates to local coordinate-system
         """
 
+        self.mgr = Manager()
+        self.node_attr_dict_factory = GraphDict
+        self.edge_attr_dict_factory = GraphDict
+        self.node_dict_factory = self.mgr.dict
+        self.edge_key_dict_factory = self.mgr.dict
+        self.adjlist_outer_dict_factory = self.mgr.dict
+        self.adjlist_inner_dict_factory = self.mgr.dict
+        # Graph attributes are stored within the object
+        self.graph_attr_dict_factory = self.mgr.dict
+
+        self.geo_origin = (0, 0)
         nx.MultiDiGraph.__init__(self)
         self.graph['crs'] = 'epsg:4326'     # WGS84
         self._subgraphs = self.mgr.dict()
@@ -397,7 +404,7 @@ class OSMGraph(nx.MultiDiGraph):
             else:
                 geometry = [(self._node[u]['x'], self._node[u]['y']),
                             (self._node[v]['x'], self._node[v]['y'])]
-                attr['_geometry'] = geometry
+                attr['_geometry'] = LineString(geometry)
 
             # add nodes
             if u not in self._succ:
