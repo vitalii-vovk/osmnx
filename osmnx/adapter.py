@@ -43,7 +43,7 @@ class GraphDict:
         # NOTE: as we need to know two coordinates to define sub graph id,
         # sub graph id definition for the node happens in 'update' method only.
         if k == 'geometry':
-            new_subgraph_ids = get_subgraph_ids(v.coords)
+            new_subgraph_ids = self.get_subgraph_ids(v.coords)
             # Sub graphs that no longer contain this edge
             orphaned_ids = set(self._gids).difference(set(new_subgraph_ids))
             for gid in orphaned_ids:
@@ -136,11 +136,11 @@ class GraphDict:
         # Special case: it's necessary to re-define and update sub graph ids which this item belongs to.
         new_subgraph_ids = []
         if 'geometry' in dct:
-            new_subgraph_ids = get_subgraph_ids(dct['geometry'].coords)
+            new_subgraph_ids = self.get_subgraph_ids(dct['geometry'].coords)
         elif '_geometry' in dct:
-            new_subgraph_ids = get_subgraph_ids(dct['_geometry'].coords)
+            new_subgraph_ids = self.get_subgraph_ids(dct['_geometry'].coords)
         elif 'x' in dct and 'y' in dct:
-            new_subgraph_ids = get_subgraph_ids([(dct['x'], dct['y'])])
+            new_subgraph_ids = self.get_subgraph_ids([(dct['x'], dct['y'])])
 
         # Obtaining actual item attributes dict (old and those that are in kwargs)
         if self._gids:
@@ -172,6 +172,14 @@ class GraphDict:
                 getattr(G, 'add_node')(self._id, **item_data)
             else:
                 getattr(G, 'add_edge')(*self._id, **item_data)
+
+            # Creates parameters used in point projection into subgraph
+            lane_pts0, lane_pts1, edge_map_idxs, edge_pt_idxs = get_projections_params(G)
+            G.graph['lane_pts0'] = lane_pts0
+            G.graph['lane_pts1'] = lane_pts1
+            G.graph['edge_map_idxs'] = edge_map_idxs
+            G.graph['edge_pt_idxs'] = edge_pt_idxs
+
             self._subs[gid] = G
 
     def pop(self, k):
@@ -187,9 +195,49 @@ class GraphDict:
             getattr(G, self._type)[self._id].clear()
             self._subs[gid] = G
 
+    def get_subgraph_ids(self, pts):
+
+        """
+        Finds 'n' nearest projections of points list to the graph
+
+        Arguments:
+            pts {iterable} -- points coordinates for projection
+
+        Returns:
+            results {list} -- list of geo hashes
+        """
+
+        min_pt = (pts // np.array((self._subs['x_res'], self._subs['y_res']))).min(axis=0).astype(np.int)
+        max_pt = (pts // np.array((self._subs['x_res'], self._subs['y_res']))).max(axis=0).astype(np.int) + 1
+
+        bboxes = []
+        hashes = []
+
+        for x in range(min_pt[0], max_pt[0]):
+            for y in range(min_pt[1], max_pt[1]):
+                bbox = ((self._subs['x_res'] * (x) - self._subs['pad'],
+                         self._subs['y_res'] * (y) - self._subs['pad']),
+                        (self._subs['x_res'] * (x + 1) + self._subs['pad'],
+                         self._subs['y_res'] * (y + 1) + self._subs['pad']))
+
+                bboxes.append(bbox)
+                hashes.append((x, y))
+
+        bboxes = np.array(bboxes)
+        hashes = np.array(hashes)
+
+        results = []
+
+        for pt in pts:
+            mask = ((pt >= bboxes[:, 0]) & (pt < bboxes[:, 1])).all(axis=1)
+            results.extend(hashes[mask])
+        results = [f'MAP_GRAPH:{coord[0]},{coord[1]}' for coord in results]
+
+        return results
+
 
 class OSMGraph(nx.MultiDiGraph):
-    def __init__(self, G, geo_convert=False):
+    def __init__(self, G, geo_convert=False, x_res=0.005, y_res=0.005, pad=0.0015):
 
         """
         Adapts osmnx graph structure and functions to numpy and numba arrays and operations
@@ -198,8 +246,10 @@ class OSMGraph(nx.MultiDiGraph):
             G {MultiDiGraph} -- road graph, which contains nodes and edges to keep in the wrapper object
             ref_lat, ref_lon {float} -- origin coordinates for the projecting (default 0, 0)
             geo_convert {bool} -- if to convert graph edges coordinates to local coordinate-system
+            x_res {float} -- longitude resolution of geo hashing
+            y_res {float} -- latitude resolution of geo hashing
+            pad {float} -- padding used for longitude and latitude hashing
         """
-
         self.mgr = Manager()
         self.node_attr_dict_factory = GraphDict
         self.edge_attr_dict_factory = GraphDict
@@ -212,8 +262,11 @@ class OSMGraph(nx.MultiDiGraph):
 
         self.geo_origin = (0, 0)
         nx.MultiDiGraph.__init__(self)
-        self.graph['crs'] = 'epsg:4326'     # WGS84
+        self.graph['crs'] = 'epsg:4326'  # WGS84
         self._subgraphs = self.mgr.dict()
+        self._subgraphs.update({'x_res': x_res,
+                                'y_res': y_res,
+                                'pad': pad})
         self.geo_convert = geo_convert
         self._lck = Lock()
 
@@ -285,8 +338,8 @@ class OSMGraph(nx.MultiDiGraph):
             gid = group['gid']
             # First, remove the existing edges with the same
             # lane group ID
-            edges_to_be_removed = [(u,v)
-                                   for u,v,e in self.edges(data=True)
+            edges_to_be_removed = [(u, v)
+                                   for u, v, e in self.edges(data=True)
                                    if e['lane_group'] == gid]
             self.remove_edges_from(edges_to_be_removed)
 
@@ -520,8 +573,9 @@ class OSMGraph(nx.MultiDiGraph):
         Finds 'n' nearest projections of the point to the graph
 
         Arguments:
-            pt {np.array} -- point coordinates for projection
+            pt {np.array} -- point coordinates for projection, in [lon, lat] order
             n {int} -- number of nearest projections to return for given point
+            geo {bool} -- if geo, 'pts' treated as geo coordinates and projected to local coordinate system
 
         Returns:
             projected_pts {np.array} -- array of n-closest graph points
@@ -529,45 +583,36 @@ class OSMGraph(nx.MultiDiGraph):
             distances {np.array} -- distances to projection
         """
 
-        gid = get_subgraph_id(pt)
+        gid = self.get_subgraph_id(pt)
         G = self._subgraphs.get(gid, None)
 
         if G is None:
             # Sub graph doesn't exist
             return None, None, None
-        """
-        if self.bboxes is not None and self.proj_params is not None:
-            # finds which bbox id corresponds to the given point
-            rect_mask = in_rect(self.bboxes[:, 0], self.bboxes[:, 1], pt)
-            # if pt in at list one bbox we continue projection
-            if np.any(rect_mask):
 
-                bbox_key = np.argmax(rect_mask)
+        pt = np.array(pt, dtype=np.float32)
 
-                # finds projections and distances to all edges
-                projected_pts, distances = project_numba(self.proj_params[bbox_key]['lane_pts0'],
-                                                         self.proj_params[bbox_key]['lane_pts1'],
-                                                         pt)
+        # finds projections and distances to all edges
+        projected_pts, distances = project_numba(G.graph['lane_pts0'],
+                                                 G.graph['lane_pts1'],
+                                                 pt)
 
-                # finds 'n' nearest projections
-                try:
-                    min_n_idxs = np.argpartition(distances, n)[:n]
+        # finds 'n' nearest projections
+        try:
+            min_n_idxs = np.argpartition(distances, n)[:n]
 
-                except ValueError:
-                    n = len(distances) - 1
-                    min_n_idxs = np.argpartition(distances, n)[:n]
-                    warnings.warn("number of n nearest projections exceeded number of edges")
+        except ValueError:
+            n = len(distances) - 1
+            min_n_idxs = np.argpartition(distances, n)[:n]
+            LOGGER.warning("number of n nearest projections exceeded number of edges")
 
-                edge_idxs = [self.proj_params[bbox_key]['edge_map_idxs'][idx] for idx in min_n_idxs]
-                projected_pts = projected_pts[min_n_idxs]
-                distances = distances[min_n_idxs]
+        edge_idxs = [G.graph['edge_map_idxs'][idx] for idx in min_n_idxs]
+        projected_pts = projected_pts[min_n_idxs]
+        distances = distances[min_n_idxs]
 
-                return projected_pts, edge_idxs, distances
-        """
-        # if pt out of all bbox or self.bboxes and self.proj_params are not defined returns None
-        return None, None, None
+        return projected_pts, edge_idxs, distances
 
-    def project_points(self, pts, n, geo=False):
+    def project_points(self, pts, n):
 
         """
         Finds 'n' nearest projections of points list to the graph
@@ -578,7 +623,7 @@ class OSMGraph(nx.MultiDiGraph):
             geo {bool} -- if geo, 'pts' treated as geo coordinates and projected to local coordinate system
 
         Returns:
-            projected_pts_list {list} -- list of arrays of n closest graph points
+            projected_pts_list {list} -- list of arrays of n the closest graph points
             edge_idxs {list} -- list of lists of the closest edges idxs
             distances {list} -- of arrays of distances to projection
         """
@@ -589,14 +634,6 @@ class OSMGraph(nx.MultiDiGraph):
 
         # iterates over all points that need to be projected
         for pt in pts:
-
-            # converts from geo to local coordinate system
-            if geo:
-                x, y, _ = pm.geodetic2enu(*pt, 0, *self.geo_origin, 0)
-                pt = np.array([x, y], dtype=np.float32)
-            else:
-                pt = np.array(list(reversed(pt)), dtype=np.float32)
-
             projected_pts, edge_idxs, distances = self._project_point(pt, n)
 
             projected_pts_list.append(projected_pts)
@@ -604,6 +641,22 @@ class OSMGraph(nx.MultiDiGraph):
             distances_list.append(distances)
 
         return projected_pts_list, edge_idxs_list, distances_list
+
+    def get_subgraph_id(self, pt):
+
+        """
+        Gets subgraph geo hash based on pt geo coordinates
+
+        Arguments:
+            pt {np.array} -- point coordinates for projection, in [lon, lat] order
+
+        Returns:
+            idx {str} -- custom geo hash id
+        """
+
+        coord = (pt // np.array((self._subgraphs['x_res'], self._subgraphs['y_res']))).astype(np.int)
+        idx = f'MAP_GRAPH:{coord[0]},{coord[1]}'
+        return idx
 
 
 @nb.njit((nb.types.Array(nb.types.float32, 2, 'C'),
@@ -646,20 +699,44 @@ def project_numba(p0, p1, p_proj):
     return closest_pts, distances
 
 
-def get_subgraph_id(coord):
+def get_projections_params(graph):
     """
-    Returns subgraph id by the provided coordinates.
-    Args:
-        coord (tuple) - lon, lat of the point
-    """
-    # TODO: replace this dummy function with a real one
-    return 'MAP_GRAPH:' + str(round(coord[0] * 1000))
+    Computes parameters for projection points to the graph
 
+    Returns:
+        lane_pts0 {np.array} -- array of first points in edge (n, 2)
+        lane_pts1 {np.array} -- array of last points in edge (n, 2)
+        edge_map_idxs {list} -- list of edges indices
+        edge_pt_idxs {list} -- list of consecutive points idxs
+        geo_origin {tuple} -- origin used to convert geo coordinates to local coordinate system
+    """
 
-def get_subgraph_ids(coords):
-    """
-    Returns list of subgraph ids, correspondent to the provided coordinates.
-    Args:
-        coords (list[tuple]) - list of tuples (lon, lat) of the points coordinates.
-    """
-    return [get_subgraph_id(coord) for coord in coords]
+    lane_pts0 = []
+    lane_pts1 = []
+    edge_map_idxs = []
+    edge_pt_idxs = []
+
+    for edgge_key in graph.edges:
+
+        edge = graph.edges[edgge_key]
+
+        if '_geometry' in edge:
+            coords = np.array(edge['_geometry'].coords, dtype=np.float32)
+
+        else:
+            coords = np.array(edge['geometry'].coords, dtype=np.float32)
+
+        lane_pts0.append(coords[1:])
+        lane_pts1.append(coords[:-1])
+        edge_map_idxs += [edgge_key for i in range(coords.shape[0] - 1)]
+        edge_pt_idxs += [i for i in range(coords.shape[0] - 1)]
+
+    if len(lane_pts0):
+        lane_pts0 = np.vstack(lane_pts0)
+        lane_pts1 = np.vstack(lane_pts1)
+        edge_pt_idxs = np.array(edge_pt_idxs)
+
+        return lane_pts0, lane_pts1, edge_map_idxs, edge_pt_idxs
+
+    else:
+        return None, None, None, None
