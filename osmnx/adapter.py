@@ -658,6 +658,18 @@ class OSMGraph(nx.MultiDiGraph):
         idx = f'MAP_GRAPH:{coord[0]},{coord[1]}'
         return idx
 
+    def get_origin(self, pt):
+        """
+        Returns geo origin for the subgraph by the given coordinates.
+        Args:
+            pt(Iterable): point coordinates for projection, in [lon, lat]
+        """
+        graph_id = self.get_subgraph_id(pt)
+        try:
+            return self._subgraphs[graph_id].graph['origin']
+        except KeyError:
+            return None
+
 
 @nb.njit((nb.types.Array(nb.types.float32, 2, 'C'),
           nb.types.Array(nb.types.float32, 2, 'C'),
