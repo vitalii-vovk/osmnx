@@ -207,19 +207,19 @@ class GraphDict:
             results {list} -- list of geo hashes
         """
 
-        min_pt = (pts // np.array((self._subs['x_res'], self._subs['y_res']))).min(axis=0).astype(np.int)
-        max_pt = (pts // np.array((self._subs['x_res'], self._subs['y_res']))).max(axis=0).astype(np.int) + 1
+        x_res = self._subs['x_res']
+        y_res = self._subs['y_res']
+        pad = self._subs['pad']
+        min_pt = (pts // np.array((x_res, y_res))).min(axis=0).astype(np.int)
+        max_pt = (pts // np.array((x_res, y_res))).max(axis=0).astype(np.int) + 1
 
         bboxes = []
         hashes = []
 
         for x in range(min_pt[0], max_pt[0]):
             for y in range(min_pt[1], max_pt[1]):
-                bbox = ((self._subs['x_res'] * (x) - self._subs['pad'],
-                         self._subs['y_res'] * (y) - self._subs['pad']),
-                        (self._subs['x_res'] * (x + 1) + self._subs['pad'],
-                         self._subs['y_res'] * (y + 1) + self._subs['pad']))
-
+                bbox = ((x_res * (x) - pad, y_res * (y) - pad),
+                        (x_res * (x + 1) + pad, y_res * (y + 1) + pad))
                 bboxes.append(bbox)
                 hashes.append((x, y))
 
